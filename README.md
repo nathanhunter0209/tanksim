@@ -103,3 +103,11 @@ Files: `compare.js`, `sweep.js`, `damage.js`, `equiv.mjs` (RHA-equivalent helper
 
 ## Rendering (v11)
 PBR plate materials (procedural mill-scale steel, ceramic tiles, rubber NERA, bolted ERA, DU/Al/Ti tints) with beveled edges; smooth damage (raised heat-tinted entry lip, scorch/temper ring, glowing rim that cools, displaced rear dome, curled petals); rods with metallic finish, separating sabot petals and a glowing tracer; soft studio lighting, contact shadows and bloom on High quality. *Impact zoom* (Advanced → View) briefly closes in and slows down at the first impact.
+
+## Re-tuned legacy targets (v12)
+| Target (public estimate) | KE equiv. | single HEAT | tandem |
+|---|---|---|---|
+| Leopard 2A6 turret front | ~800 mm | ~1780 mm | ~1000 mm |
+| T-72B (1989) + Kontakt-5 | ~784 mm | ~1690 mm* | ~661 mm |
+
+*Higher than the ~900–1100 mm public estimate: in this model K-5 plus NERA inserts over-penalise thin single jets. Kontakt-5 now has a per-material jet-cut coefficient (`era.jet`, 0.8 vs 3.5 for light ERA).

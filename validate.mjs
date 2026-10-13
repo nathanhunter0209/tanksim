@@ -52,6 +52,19 @@ for (const [k, [lo, hi]] of Object.entries(EST)) { const p = SCENARIOS[k].plates
   const o = (pj, r) => simulate({ proj: pj, range: r, plates: p }).outcome;
   check(`${k}: M829 @2km and PG-7V both stopped`, o('m829', 2000) !== 'PERFORATED' && o('pg7v', 0) !== 'PERFORATED', 0, 0, 'older threats defeated');
   check(`${k}: has description + 'estimate' label`, /estimate/i.test(SCENARIOS[k].target) && !!SCENARIOS[k].desc, 0, 0, 'labeling'); }
+// 5b2. Stage G: re-tuned legacy targets
+{ const L = SCENARIOS.leo2a6.plates, T = SCENARIOS.t72b.plates, o = (p, pj, r) => simulate({ proj: pj, range: r, plates: p }).outcome;
+  check('leo2a6: KE RHA-equivalent (mm)', keEquiv(L), 700, 850, 'public estimates ~700–800+');
+  check('leo2a6: tandem-CE RHA-equivalent (mm)', ceEquiv(L, 'tandem'), 1000, 1900, 'public estimates 1000+');
+  check('t72b+K5: KE RHA-equivalent incl. ERA (mm)', keEquiv(T), 750, 800, 'public estimates ~750–800');
+  check('t72b+K5: single-HEAT RHA-equivalent (mm)', ceEquiv(T, 'sc'), 900, 2000, 'public est. ~900–1100; model overshoots (K-5 + NERA vs thin single jet)');
+  check('t72b+K5: tandem RHA-equivalent (mm)', ceEquiv(T, 'tandem'), 650, 800, 'public estimates ~650–800');
+  check('t72b+K5: single HEAT notably worse than tandem (×)', ceEquiv(T, 'sc') / ceEquiv(T, 'tandem'), 1.25, 3.0, 'K-5 defeats non-tandem jets', x => x.toFixed(2));
+  check('M829 @2km stopped by leo2a6 and t72b', o(L, 'm829', 2000) !== 'PERFORATED' && o(T, 'm829', 2000) !== 'PERFORATED', 0, 0, '1980s DU rod vs late-80s/90s armor');
+  const near = (p, pj) => { const v = keEquiv(p), pen = semi(pj, 1000); return Math.abs(pen - v) / v; };
+  check('3BM60 vs leo2a6/t72b: marginal (|pen-equiv| / equiv)', Math.max(near(L, '3bm60'), near(T, '3bm60')), 0, .15, 'modern rods roughly match these fronts', x => (x * 100).toFixed(0) + '%');
+  check('M829A3 vs leo2a6/t72b: marginal (|pen-equiv| / equiv)', Math.max(near(L, 'm829a3'), near(T, 'm829a3')), 0, .15, 'modern rods roughly match these fronts', x => (x * 100).toFixed(0) + '%');
+  check('3BM60 @1km perforates t72b', o(T, '3bm60', 1000) === 'PERFORATED', 0, 0, 'modern Russian rod vs older T-72B'); }
 // 5c. sweep charts (stage E)
 const ks = (k, plates, range = 0) => { const p = PROJECTILES[k]; return { proj: k, core: p.core, D: p.D, L: p.L, pen: p.pen, v0: p.v0, range, plates }; };
 { const t0 = performance.now(); const d = runSweep(ks('m829', [P('rha', 0, 480)]), 'range'); const c = d.cross.find(c => c.from === 'PERFORATED' && c.to !== 'PERFORATED');
