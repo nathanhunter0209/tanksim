@@ -1,4 +1,4 @@
-const CACHE = "tanksim-v5";
+const CACHE = "tanksim-v6";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png", "./icons/apple-touch-icon.png",
   "./app.js", "./data.js", "./physics.js", "./projectile.js", "./vendor/build/three.module.js", "./vendor/jsm/controls/OrbitControls.js", "./vendor/jsm/controls/TransformControls.js", "./vendor/jsm/environments/RoomEnvironment.js"];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });

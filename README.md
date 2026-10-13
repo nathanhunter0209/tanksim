@@ -19,7 +19,7 @@ Earlier versions: tag `v1-showroom` (tank showroom) and tag `v2-sandbox-complex`
 - Per-plate results table and v/L-vs-time chart.
 - Save/Load (localStorage) and share links.
 
-On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v5`).
+On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v6`).
 
 ## Physics (physics.js): time-stepped along the shot line, runs in a few ms
 - **Geometry:** a ray/plate intersection gives the LOS and obliquity of every plate and rib.
@@ -41,6 +41,18 @@ On phones the controls are a bottom sheet, and Advanced opens as a second sheet.
   - The element scale is calibrated so that semi-infinite RHA equals the round's published nominal value.
   - ERA/NERA disrupt the jet. A tandem precursor clears the first ERA.
 - **Behind-armor debris:** cone angle and fragment count from residual velocity and mass (narrower behind a spall liner).
+
+## Calibration notes (stage A refinements)
+- **RHA resistance:** Rt = 4.4 GPa (HHA 5.35, cast 3.85), fitted so that a tungsten L/D 20 rod gives P/L ≈ 1.0 at 1.6 km/s.
+- **DU self-sharpening:** DU's adiabatic shear gives a narrower crater, modelled as a 6% lower effective Rt (`CORES.du.rf = 0.94`).
+- **Downrange velocity:** the loss rate scales ∝ 1/L (drag ∝ frontal area / mass), `kloss = 0.035·(600/L)^0.8` per km. 3BM9 keeps its explicit, higher value.
+- **DM53:** uses its published L55 muzzle velocity (1750 m/s).
+- **Result:** M829A3 / 3BM60 / DM53 come out at about 705–716 mm at 2 km.
+- **Heavy ERA against rods:** the flyer only acts while it sweeps across the shot line, so it damages a roughly fixed rod *length*, `ΔL = v·T_int·clamp(2.5·η)` with T_int = 160 µs. Longer modern rods therefore lose a smaller fraction. This general rule replaces the old M829A3-only flag.
+  - Kontakt-5 reductions: 25–29% on M829, 3BM32 and M829A1, and 22–25% on M829A3, 3BM60 and DM53.
+- **Shaped-charge jets:** jets stretch until breakup at ≈ 2.1 µs per mm of cone diameter, then particulate with efficiency falling over 1.5 × the breakup time. Penetration therefore peaks near 7 CD of standoff.
+- **Tandem warheads:** they still lose about 7% to debris from ERA that the precursor has already set off.
+- **Fitted constants:** T_int, the 2.5 severity factor, the breakup factor and the 7% tandem loss are fitted parameters, not first-principles values.
 
 ## Validation
 Run `node validate.mjs`. It compares the model against public reference values and exits non-zero on any failure. Checks:

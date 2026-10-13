@@ -38,6 +38,9 @@ check('Non-tandem jet behind K-5 strongly reduced', ceSemi('sc', [P('k5', 0, 60,
 const so = cd => { const r = simulate({ proj: 'pg7v', range: 0, plates: [P('alu', 0, 1, 0, { w: .2, h: .2 }), block(.085 * cd)] }); return depthIn(r, 1); };
 check('Standoff: ~6 CD deeper than built-in', so(6) > ceSemi('pg7v', [block(.15)]), 0, 0, 'classic standoff curve');
 check('Standoff: 25 CD shallower (jet breakup)', so(25) < so(6) * .8, 0, 0, 'jet particulation');
+let best = [0, 0]; for (let cd = 0; cd <= 20; cd++) { const d = so(cd); if (d > best[1]) best = [cd, d]; }
+check('Standoff optimum (charge diameters)', best[0], 4, 8, 'classic standoff curves peak ~4–8 CD', x => x.toFixed(0) + ' CD');
+check('Optimum gain vs built-in standoff (×)', best[1] / ceSemi('pg7v', [block(.15)]), 1.2, 2.0, 'typ. ~1.3–1.8×', x => x.toFixed(2));
 // 6. scenarios + performance
 let tmax = 0; for (const [k, sc] of Object.entries(SCENARIOS)) for (const pj of [sc.proj, 'm829a3', 'kornet', 'pg7v']) { const a = performance.now(); simulate({ proj: pj, range: sc.range, plates: sc.plates }); tmax = Math.max(tmax, performance.now() - a); }
 check('Max simulate() time per shot (ms)', tmax, 0, 50, 'interactive budget', x => x.toFixed(1));

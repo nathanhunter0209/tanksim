@@ -5,12 +5,13 @@ export const DISCLAIMER = 'Approximate model. All projectile and armor data are 
 // Penetrator core materials: density kg/m3, dynamic strength Yp (Pa), Lanz-Odermatt constants
 export const CORES = {
   wha: { name: 'Tungsten alloy', rho: 17600, Y: 1.2e9, lo: { a: .994, c0: 134.5, c1: -.148 } },
-  du: { name: 'Depleted uranium', rho: 18600, Y: 1.0e9, lo: { a: .994, c0: 134.5, c1: -.148 }, bonus: 1.06 },
+  du: { name: 'Depleted uranium', rho: 18600, Y: 1.0e9, lo: { a: .994, c0: 134.5, c1: -.148 }, bonus: 1.06, rf: .94 }, // rf: adiabatic-shear 'self-sharpening' → narrower crater, ~6% lower effective target resistance (Magness-type data)
   steel: { name: '4340 steel', rho: 7850, Y: 1.4e9, lo: { a: 1.104, c0: 9874, c1: 0, k: 1 } },
   wc: { name: 'Tungsten carbide', rho: 15000, Y: 2.0e9, lo: { a: .94, c0: 134.5, c1: -.148 }, brittle: 1 },
 };
 // KE: rod diameter D (mm), rod length L (mm), gun caliber (mm), muzzle velocity, velocity loss (fraction per km)
-const KE = (name, country, cal, D, L, core, v0, fins = 6, kloss = .035) => ({ name, country, type: 'KE', cal, D, L, core, v0, fins, kloss });
+// kloss (1/km): drag deceleration ∝ frontal area / mass ∝ 1/L for a rod of given D and density → long rods keep more velocity downrange
+const KE = (name, country, cal, D, L, core, v0, fins = 6, kloss = null) => ({ name, country, type: 'KE', cal, D, L, core, v0, fins, kloss: kloss ?? +(.035 * Math.pow(600 / L, .8)).toFixed(4) });
 // CE: warhead caliber (mm), nominal jet penetration at optimal standoff (mm RHA), flight speed, tandem precursor
 const CE = (name, country, cal, pen, v0, kind, tandem = false) => ({ name, country, type: 'CE', cal, pen, v0, kind, tandem, core: 'cu' });
 export const PROJECTILES = {
@@ -19,12 +20,12 @@ export const PROJECTILES = {
   m829: KE('M829', 'USA', 120, 27, 545, 'du', 1670),
   m829a1: KE('M829A1', 'USA', 120, 24, 684, 'du', 1575),
   m829a2: KE('M829A2', 'USA', 120, 24, 684, 'du', 1680),
-  m829a3: { ...KE('M829A3', 'USA', 120, 22, 800, 'du', 1555), sacTip: true }, // steel nose section intended to trigger/absorb ERA (public description)
+  m829a3: KE('M829A3', 'USA', 120, 22, 800, 'du', 1555),
   dm13: KE('DM13', 'Germany', 105, 38, 380, 'wc', 1455),
   dm23: KE('DM23', 'Germany', 105, 32, 420, 'wha', 1455),
   dm33: KE('DM33', 'Germany', 120, 28, 480, 'wha', 1650),
   dm43: KE('DM43', 'Germany', 120, 26, 570, 'wha', 1740),
-  dm53: KE('DM53', 'Germany', 120, 25, 745, 'wha', 1670),
+  dm53: KE('DM53 (L55)', 'Germany', 120, 25, 745, 'wha', 1750), // L55 gun velocity; ~1670 m/s from L44 (public estimates)
   '3bm9': KE('3BM9', 'USSR/Russia', 125, 40, 520, 'steel', 1785, 5, .08),
   '3bm22': KE('3BM22', 'USSR/Russia', 125, 36, 400, 'wc', 1760, 5),
   '3bm32': KE('3BM32', 'USSR/Russia', 125, 32, 570, 'du', 1700, 5),
@@ -47,10 +48,10 @@ export const PROJECTILES = {
 // nera: bulging steel plates {h (m), vb (m/s), T (s)}; air = no material (marker volumes).
 const M = (name, group, rho, R, color, extra = {}) => ({ name, group, rho, R, color, ...extra });
 export const MATERIALS = {
-  barrier: M('Barrier', 'Steel', 7850, 4.6e9, '#9aa3ab', { desc: 'Generic RHA-like barrier.' }),
-  rha: M('RHA steel', 'Steel', 7850, 4.6e9, '#8f989f', { desc: 'Rolled homogeneous armor, ~270 BHN.' }),
-  hha: M('HHA steel', 'Steel', 7850, 5.6e9, '#a3a9b0', { desc: 'High-hardness armor, ~500 BHN.' }),
-  cast: M('Cast steel', 'Steel', 7800, 4.0e9, '#7e858a', { desc: 'Cast armor steel, ~240 BHN.' }),
+  barrier: M('Barrier', 'Steel', 7850, 4.4e9, '#9aa3ab', { desc: 'Generic RHA-like barrier.' }),
+  rha: M('RHA steel', 'Steel', 7850, 4.4e9, '#8f989f', { desc: 'Rolled homogeneous armor, ~270 BHN.' }),
+  hha: M('HHA steel', 'Steel', 7850, 5.35e9, '#a3a9b0', { desc: 'High-hardness armor, ~500 BHN.' }),
+  cast: M('Cast steel', 'Steel', 7800, 3.85e9, '#7e858a', { desc: 'Cast armor steel, ~240 BHN.' }),
   alu: M('Aluminium 5083', 'Light', 2660, 1.7e9, '#c6ccd2'),
   ti: M('Titanium Ti-6Al-4V', 'Light', 4430, 4.3e9, '#b0b6c8'),
   textolite: M('Textolite (GRP)', 'Light', 1800, .7e9, '#cdb48a'),

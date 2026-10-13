@@ -8,7 +8,7 @@
 //     ERA / NERA disruption windows, tandem precursor. Pure JS; runs in a few ms.
 import { CORES, MATERIALS, PROJECTILES } from './data.js';
 const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI, clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-const RHO_CU = 8900, R_RHA = MATERIALS.rha.R, SEC = 2.0;
+const RHO_CU = 8900, R_RHA = MATERIALS.rha.R, SEC = 2.0, ERA_TINT = 160e-6, ERA_K = 2.5, TANDEM_RESID = .07; // ~5–15% loss of tandem main jets to precursor-initiated ERA debris (public estimates)
 
 // ---------- geometry ----------
 export function plateAxes(p) { const a = -rad(p.ax), b = rad(p.ay);
@@ -66,7 +66,7 @@ function debrisCone(v, mres, liner) { // behind-armor debris: half-angle narrows
 // ---------------- KE ----------------
 function simKE(pr, shot, segs, v0, rand) {
   const coreK = shot.core || pr.core, core = CORES[coreK], D = (shot.D ?? pr.D) / 1000, Ltot = (shot.L ?? pr.L) / 1000, rp = core.rho, Yp = core.Y;
-  let sacUsed = false, L = Ltot * .93, v = v0, yaw = 0, omega = 0; // yaw angle (deg) and yaw rate (deg/s)
+  let L = Ltot * .93, v = v0, yaw = 0, omega = 0; // yaw angle (deg) and yaw rate (deg/s)
   const first = segs.length ? segs[0].sIn : 0, start = first - .45 - Ltot; let tip = start + Ltot, t = 0;
   const samples = [], segEvents = [], debris = [], holes = [], era = [], bulges = []; let outcome = 'PERFORATED', ric = null;
   const rec = (u, si) => samples.push({ t, tip, tail: tip - L - Ltot * .07, L, v, u, seg: si });
@@ -85,9 +85,12 @@ function simKE(pr, shot, segs, v0, rand) {
       if (s.obl > thc - 6) { yaw += 3 * (s.obl - thc + 6) / 6; ev.notes.push('near-critical angle: rod bending/yaw'); } }
     // ERA / NERA moving plates: flyer momentum vs rod → tip loss + yaw (fracture)
 
+    // ERA / NERA moving plates. Heavy ERA: the flyer interacts with the rod only while it sweeps across the shot line, so it damages
+    // a roughly fixed rod LENGTH (≈ v · T_int) rather than a fraction: longer rods (and rods with sacrificial nose sections) lose a smaller share.
     const plateHit = (h, rho, vf, n, label) => { const sinT = Math.max(Math.sin(rad(s.obl)), .2), eta = n * rho * h * vf * sinT / (rp * D * v);
-      const Tw = label === 'ERA' ? 70e-6 : 0, sac = label === 'ERA' && pr.sacTip && !sacUsed ? (sacUsed = true, .35) : 1; const dL = Math.min(L * .6, (label === 'ERA' ? 1.6 : .8) * eta * v * (Tw || 40e-6) * sac); L -= dL;
-      const dy = clamp(eta * 60 * sac, 0, 18); yaw += dy; omega += dy * 2500; ev.notes.push(`${label}: −${(dL * 1000).toFixed(0)} mm rod, +${dy.toFixed(1)}° yaw`); return dL; };
+      let dL, dy; if (label === 'ERA') { const Ld = v * ERA_TINT, sev = clamp(ERA_K * eta, 0, .85); dL = Math.min(L * .7, Ld * sev); dy = clamp(eta * 3, 0, 1); }
+      else { dL = Math.min(L * .6, .8 * eta * v * 40e-6); dy = clamp(eta * 60, 0, 18); }
+      L -= dL; yaw += dy; omega += dy * 2500; ev.notes.push(`${label}: −${(dL * 1000).toFixed(0)} mm rod, +${dy.toFixed(1)}° yaw`); return dL; };
     if (m.era) { era.push({ plate: s.plate, t0: t }); plateHit(m.era.h, m.era.rho, m.era.vf, m.era.n, 'ERA'); }
     if (m.nera) { bulges.push({ plate: s.plate, t0: t }); }
     // dwell (ceramic interface defeat)
@@ -96,7 +99,7 @@ function simKE(pr, shot, segs, v0, rand) {
     const dt = clamp(s.los / v / 300, 2e-8, 2.5e-7); let breakout = false, steps = 0, tIn = t;
     while (steps++ < 200000) {
       const rem = s.sOut - tip, Deff = D * yawF();
-      let R = m.R * yawF() * (m.dwell && !s.backed ? .65 : 1);
+      let R = m.R * (core.rf || 1) * yawF() * (m.dwell && !s.backed ? .65 : 1);
       R *= .3 + .7 * clamp(rem / (2.2 * Deff), 0, 1); // rear-face: plastic zone reaches free surface → lower resistance
       if (m.nera && t - tIn < m.nera.T) R *= 1 + .5 * Math.sin(Math.PI * (t - tIn) / m.nera.T); // bulging plates feeding into the path
       let u;
@@ -122,7 +125,7 @@ function simKE(pr, shot, segs, v0, rand) {
   }
   if (outcome === 'PERFORATED') fly(tip + .6);
   // behind-armor residual: semi-infinite RHA with current rod state
-  const behind = outcome === 'PERFORATED' ? semiInfRHA(L, D, v, rp, Yp, yaw) * 1000 : 0;
+  const behind = outcome === 'PERFORATED' ? semiInfRHA(L, D, v, rp, Yp, yaw, R_RHA * (core.rf || 1)) * 1000 : 0;
   const crewHit = outcome === 'PERFORATED' && segs.some(s => MATERIALS[s.mat].crew);
   return { type: 'KE', samples, segEvents, debris, holes, era, bulges, outcome, ric, tEnd: t + (outcome === 'RICOCHET' ? 1.2e-3 : 3e-4), Lres: outcome === 'PERFORATED' ? L * 1000 : 0, vres: outcome === 'PERFORATED' ? v : 0, behind, crewHit, yaw, D, Ltot, start };
 }
@@ -136,7 +139,7 @@ export function semiInfRHA(L, D, v, rp, Yp, yaw = 0, R = R_RHA, rt = 7850) {
 const JET = { rpg: { vt: 7400, vtail: 2000, tb: 1.15 }, atgm: { vt: 8500, vtail: 2000, tb: 1.25 }, heat: { vt: 8200, vtail: 2000, tb: 1.2 } };
 function jetElements(pr, k = 1) { const J = JET[pr.kind] || JET.heat, N = 160, els = [];
   for (let i = 0; i < N; i++) { const v1 = J.vt - (J.vt - J.vtail) * i / N, v2 = J.vt - (J.vt - J.vtail) * (i + 1) / N; els.push({ v: (v1 + v2) / 2, dv: v1 - v2, k, alive: 1 }); }
-  return { els, tb: J.tb * pr.cal * 1e-6 }; } // breakup time ~ 1.2 µs per mm cone diameter
+  return { els, tb: J.tb * pr.cal * 1e-6 * 1.8 }; } // breakup time ~2.1 µs per mm cone diameter: puts the standoff optimum near 4–8 CD (classic curves)
 // march jet elements into a material stack along the path; returns penetration depth, per-element arrivals
 function dpsm(pr, layers, xLiner, scale, disrupt) {
   const { els, tb } = jetElements(pr, scale); let P = layers.length ? layers[0].sIn : xLiner + .3, li = 0; const arrivals = [];
@@ -165,11 +168,11 @@ function simCE(pr, shot, segs, v0, rand) {
   for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (ref(mid) < pr.pen / 1000) lo = mid; else hi = mid; } const scale = (lo + hi) / 2;
   // tandem precursor clears ERA ahead of the main charge
   const segEvents = segs.map((s, si) => ({ seg: si, notes: [], perforated: false, Lin: 0 })), era = [], bulges = [], debris = [], holes = [];
-  let precursor = pr.tandem; const eraWin = [];
-  segs.forEach((s, si) => { const m = MATERIALS[s.mat]; if (m.era) { if (precursor) { precursor = false; segEvents[si].notes.push('ERA initiated early by tandem precursor — main jet unaffected'); era.push({ plate: s.plate, t0: -2e-4 }); }
+  let precursor = pr.tandem; const eraWin = [], cleared = [];
+  segs.forEach((s, si) => { const m = MATERIALS[s.mat]; if (m.era) { if (precursor) { precursor = false; segEvents[si].notes.push('ERA initiated early by tandem precursor — main jet only grazes residual debris'); era.push({ plate: s.plate, t0: -2e-4 }); cleared.push(s); }
       else eraWin.push({ si, s, m, eta: m.era.n * m.era.rho * m.era.h * m.era.vf * Math.max(Math.sin(rad(s.obl)), .25) }); }
     if (m.nera) eraWin.push({ si, s, m, nera: true, eta: 2 * 7850 * m.nera.h * m.nera.vb * Math.max(Math.sin(rad(s.obl)), .25) }); });
-  const disrupt = (e, ta, P) => { let f = 1; for (const w of eraWin) { const tArrW = (w.s.sIn - xLiner) / e.v; if (P < w.s.sIn - 1e-6) continue; // element passes through this plate's location
+  const disrupt = (e, ta, P) => { let f = 1; for (const c of cleared) if (P >= c.sIn - 1e-6) f *= 1 - TANDEM_RESID; /* flyer/casing debris left by the precursor */ for (const w of eraWin) { const tArrW = (w.s.sIn - xLiner) / e.v; if (P < w.s.sIn - 1e-6) continue; // element passes through this plate's location
       const firstArr = (w.s.sIn - xLiner) / JET[pr.kind || 'heat'].vt; const delay = tArrW - firstArr; const tAct = w.nera ? 4e-6 : 6e-6; if (delay < tAct) continue; // jet tip passes before plates move
       if (w.nera && delay > w.m.nera.T + tAct) continue; const dJet = cal * .06; const cut = clamp(w.eta / (RHO_CU * dJet * e.v) * (w.nera ? 2.2 : 3.5), 0, .97); f *= 1 - cut; } return f; };
   const sim = dpsm(pr, segs.map(s => ({ ...s })), xLiner, scale, disrupt);
