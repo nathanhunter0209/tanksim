@@ -57,9 +57,9 @@ for (const [k, [lo, hi]] of Object.entries(EST)) { const p = SCENARIOS[k].plates
   check('leo2a6: KE RHA-equivalent (mm)', keEquiv(L), 700, 850, 'public estimates ~700–800+');
   check('leo2a6: tandem-CE RHA-equivalent (mm)', ceEquiv(L, 'tandem'), 1000, 1900, 'public estimates 1000+');
   check('t72b+K5: KE RHA-equivalent incl. ERA (mm)', keEquiv(T), 750, 800, 'public estimates ~750–800');
-  check('t72b+K5: single-HEAT RHA-equivalent (mm)', ceEquiv(T, 'sc'), 900, 2000, 'public est. ~900–1100; model overshoots (K-5 + NERA vs thin single jet)');
+  check('t72b+K5: single-HEAT RHA-equivalent (mm)', ceEquiv(T, 'sc'), 900, 1100, 'public estimates ~900–1100');
   check('t72b+K5: tandem RHA-equivalent (mm)', ceEquiv(T, 'tandem'), 650, 800, 'public estimates ~650–800');
-  check('t72b+K5: single HEAT notably worse than tandem (×)', ceEquiv(T, 'sc') / ceEquiv(T, 'tandem'), 1.25, 3.0, 'K-5 defeats non-tandem jets', x => x.toFixed(2));
+  check('t72b+K5: single HEAT notably worse than tandem (×)', ceEquiv(T, 'sc') / ceEquiv(T, 'tandem'), 1.25, 2.0, 'K-5 defeats non-tandem jets', x => x.toFixed(2));
   check('M829 @2km stopped by leo2a6 and t72b', o(L, 'm829', 2000) !== 'PERFORATED' && o(T, 'm829', 2000) !== 'PERFORATED', 0, 0, '1980s DU rod vs late-80s/90s armor');
   const near = (p, pj) => { const v = keEquiv(p), pen = semi(pj, 1000); return Math.abs(pen - v) / v; };
   check('3BM60 vs leo2a6/t72b: marginal (|pen-equiv| / equiv)', Math.max(near(L, '3bm60'), near(T, '3bm60')), 0, .15, 'modern rods roughly match these fronts', x => (x * 100).toFixed(0) + '%');
@@ -67,6 +67,12 @@ for (const [k, [lo, hi]] of Object.entries(EST)) { const p = SCENARIOS[k].plates
   check('3BM60 @1km perforates t72b', o(T, '3bm60', 1000) === 'PERFORATED', 0, 0, 'modern Russian rod vs older T-72B'); }
 // 5c. sweep charts (stage E)
 const ks = (k, plates, range = 0) => { const p = PROJECTILES[k]; return { proj: k, core: p.core, D: p.D, L: p.L, pen: p.pen, v0: p.v0, range, plates }; };
+// 5d. Stage H: M829A3 vs T-72B+K5 range crossover, and every default scenario's expected outcome
+{ const d = runSweep(ks('m829a3', SCENARIOS.t72b.plates), 'range'); const c = d.cross.find(c => c.from === 'PERFORATED' && c.to !== 'PERFORATED');
+  check('M829A3 vs T-72B+K5: perforates close, stopped far (crossover km)', c ? c.x / 1000 : -1, 1, 4, 'marginal at typical ranges', x => x.toFixed(2));
+  const EXPECT = { strv103: 'RICOCHET', abrams: 'PERFORATED', t72b: 'PERFORATED', leo2a6: 'STOPPED', t90m: 'STOPPED', leo2a7: 'STOPPED', ch3: 'STOPPED', merkava4: 'STOPPED', m1a2: 'STOPPED', rha300: 'PERFORATED' };
+  for (const [k, sc] of Object.entries(SCENARIOS)) { const out = simulate({ proj: sc.proj, range: sc.range, plates: sc.plates }).outcome;
+    check(`Default ${k} (${sc.proj} @${sc.range} m): ${EXPECT[k] ?? '?'}`, out === EXPECT[k], 0, 0, 'plausible default outcome'); } }
 { const t0 = performance.now(); const d = runSweep(ks('m829', [P('rha', 0, 480)]), 'range'); const c = d.cross.find(c => c.from === 'PERFORATED' && c.to !== 'PERFORATED');
   check('Range sweep M829 vs 480 mm RHA: perforation limit (km)', c ? c.x / 1000 : -1, .5, 4, 'crossover found; lower velocity at range', x => x.toFixed(2));
   const d2 = runSweep(ks('3bm9', [P('rha', 0, 40)], 1000), 'angle', 0); const c2 = d2.cross.find(c => c.to === 'RICOCHET');

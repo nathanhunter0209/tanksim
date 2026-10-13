@@ -8,7 +8,7 @@
 //     ERA / NERA disruption windows, tandem precursor. Pure JS; runs in a few ms.
 import { CORES, MATERIALS, PROJECTILES } from './data.js';
 const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI, clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-const RHO_CU = 8900, R_RHA = MATERIALS.rha.R, SEC = 2.0, ERA_TINT = 160e-6, ERA_K = 2.5, TANDEM_RESID = .07, NERA_JET = 6, ERA_JET = 3.5; /* light-ERA jet-cut coefficient; heavy ERA may override via era.jet */ // NERA jet-disruption coefficient (fitted: bulging plates are mass-efficient vs jets, ~2–3× RHA) // ~5–15% loss of tandem main jets to precursor-initiated ERA debris (public estimates)
+const RHO_CU = 8900, R_RHA = MATERIALS.rha.R, SEC = 2.0, ERA_TINT = 160e-6, ERA_K = 2.5, TANDEM_RESID = .07, NERA_JET = 6, ERA_JET = 3.5, JET_DEXP = .5; /* light-ERA jet-cut coefficient; heavy ERA may override via era.jet */ // NERA jet-disruption coefficient (fitted: bulging plates are mass-efficient vs jets, ~2–3× RHA) // ~5–15% loss of tandem main jets to precursor-initiated ERA debris (public estimates)
 
 // ---------- geometry ----------
 export function plateAxes(p) { const a = -rad(p.ax), b = rad(p.ay);
@@ -174,7 +174,7 @@ function simCE(pr, shot, segs, v0, rand) {
     if (m.nera) eraWin.push({ si, s, m, nera: true, eta: 2 * 7850 * m.nera.h * m.nera.vb * Math.max(Math.sin(rad(s.obl)), .25) }); });
   const disrupt = (e, ta, P) => { let f = 1; for (const c of cleared) if (P >= c.sIn - 1e-6) f *= 1 - TANDEM_RESID; /* flyer/casing debris left by the precursor */ for (const w of eraWin) { const tArrW = (w.s.sIn - xLiner) / e.v; if (P < w.s.sIn - 1e-6) continue; // element passes through this plate's location
       const firstArr = (w.s.sIn - xLiner) / JET[pr.kind || 'heat'].vt; const delay = tArrW - firstArr; const tAct = w.nera ? 4e-6 : 6e-6; if (delay < tAct) continue; // jet tip passes before plates move
-      if (w.nera && delay > w.m.nera.T + tAct) continue; const dJet = cal * .06; const cut = clamp(w.eta / (RHO_CU * dJet * e.v) * (w.nera ? NERA_JET : (w.m.era.jet ?? ERA_JET)), 0, .97); f *= 1 - cut; } return f; };
+      if (w.nera && delay > w.m.nera.T + tAct) continue; const dJet = cal * .06 * Math.pow(Math.max(.5, pr.pen / (pr.cal * 5)), JET_DEXP); /* jet diameter grows with pen per calibre (denser, thicker jet) */ const cut = clamp(w.eta / (RHO_CU * dJet * e.v) * (w.nera ? NERA_JET : (w.m.era.jet ?? ERA_JET)), 0, .97); f *= 1 - cut; } return f; };
   const sim = dpsm(pr, segs.map(s => ({ ...s })), xLiner, scale, disrupt);
   for (const w of eraWin) { segEvents[w.si].notes.push(w.nera ? 'NERA bulge disrupted jet' : 'ERA flyers cut the jet'); (w.nera ? bulges : era).push({ plate: w.s.plate, t0: (w.s.sIn - xLiner) / JET[pr.kind || 'heat'].vt }); }
   // reconstruct timeline: crater bottom position vs time

@@ -104,10 +104,16 @@ Files: `compare.js`, `sweep.js`, `damage.js`, `equiv.mjs` (RHA-equivalent helper
 ## Rendering (v11)
 PBR plate materials (procedural mill-scale steel, ceramic tiles, rubber NERA, bolted ERA, DU/Al/Ti tints) with beveled edges; smooth damage (raised heat-tinted entry lip, scorch/temper ring, glowing rim that cools, displaced rear dome, curled petals); rods with metallic finish, separating sabot petals and a glowing tracer; soft studio lighting, contact shadows and bloom on High quality. *Impact zoom* (Advanced → View) briefly closes in and slows down at the first impact.
 
-## Re-tuned legacy targets (v12)
-| Target (public estimate) | KE equiv. | single HEAT | tandem |
-|---|---|---|---|
-| Leopard 2A6 turret front | ~800 mm | ~1780 mm | ~1000 mm |
-| T-72B (1989) + Kontakt-5 | ~784 mm | ~1690 mm* | ~661 mm |
+## Calibration notes (v13, Stage H)
+- **Jet diameter vs NERA/ERA:** the cut that a moving plate makes in a jet element scales as plate momentum / (jet density × jet diameter × element velocity), applied only during the plate's interaction window. The jet diameter used to be fixed at 0.06 × charge calibre, so a high-penetration charge at fixed calibre lost the same fraction to every plate, and single-charge equivalents of NERA-heavy targets blew up multiplicatively. The jet diameter now grows with penetration per calibre, `d = 0.06·cal·(pen / 5 cal)^0.5`. A nominal 5-CD charge is unchanged.
+- **Kontakt-5** keeps its own jet-cut coefficient (0.8; light ERA 3.5): a thick, slower heavy flyer.
+- **M829A3:** working DU length raised from 800 to 850 mm and diameter from 22 to 25 mm (L/D 34, ~7.8 kg), velocity 1555 m/s unchanged. The model gives ~803 mm at the muzzle and ~765 mm at 2 km. The fixed-length heavy-ERA rule means the longer rod loses proportionally less to K-5.
+- **Layouts re-tuned (ranges unchanged):** Leopard 2A6 (more NERA + GRP layer), T-90M (GRP layer), T-72B (rear cast 64 mm).
 
-*Higher than the ~900–1100 mm public estimate: in this model K-5 plus NERA inserts over-penalise thin single jets. Kontakt-5 now has a per-material jet-cut coefficient (`era.jet`, 0.8 vs 3.5 for light ERA).
+| Target | KE | single HEAT | tandem |
+|---|---|---|---|
+| Leopard 2A6 front | ~825 mm | ~1240 mm | ~1020 mm |
+| T-72B (1989) + Kontakt-5 | ~752 mm | ~1074 mm | ~668 mm |
+| T-90M + Relikt | ~965 mm | — | ~1000 mm |
+
+Default T-72B scenario now fires M829A3 at 1.5 km (perforates; the crossover is ~2.65 km).
