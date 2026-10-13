@@ -3,6 +3,7 @@
 // public estimates for named rounds and ERA. Everything here is an approximation.
 import { simulate, semiInfRHA } from './physics.js';
 import { SCENARIOS } from './data.js';
+import { keEquiv, ceEquiv } from './equiv.mjs';
 const P = (mat, x, t, ax = 0, extra = {}) => ({ mat, x, y: 0, z: 0, t, ax, ay: 0, w: 1.2, h: 1.2, ...extra });
 const block = front => P('rha', front + 2, 4000); // 4 m semi-infinite block, front face at `front`
 const depthIn = (r, plateIdx) => { const h = r.holes.filter(h => r.segs[h.seg].plate === plateIdx).pop(); return h ? (h.sEnd - h.sIn) * 1000 : 0; };
@@ -41,6 +42,14 @@ check('Standoff: 25 CD shallower (jet breakup)', so(25) < so(6) * .8, 0, 0, 'jet
 let best = [0, 0]; for (let cd = 0; cd <= 20; cd++) { const d = so(cd); if (d > best[1]) best = [cd, d]; }
 check('Standoff optimum (charge diameters)', best[0], 4, 8, 'classic standoff curves peak ~4–8 CD', x => x.toFixed(0) + ' CD');
 check('Optimum gain vs built-in standoff (×)', best[1] / ceSemi('pg7v', [block(.15)]), 1.2, 2.0, 'typ. ~1.3–1.8×', x => x.toFixed(2));
+// 5b. Stage B public-estimate turret layouts: RHA-equivalent protection and simple outcome sanity
+const EST = { t90m: [800, 1050], leo2a7: [850, 1050], ch3: [800, 1000], merkava4: [800, 1000], m1a2: [850, 1000] };
+for (const [k, [lo, hi]] of Object.entries(EST)) { const p = SCENARIOS[k].plates;
+  check(`${k}: KE RHA-equivalent (mm)`, keEquiv(p), lo, hi, 'public estimates (turret front)');
+  check(`${k}: tandem-CE RHA-equivalent (mm)`, ceEquiv(p, 'tandem'), 900, 1900, 'public estimates ~1000–1500+');
+  const o = (pj, r) => simulate({ proj: pj, range: r, plates: p }).outcome;
+  check(`${k}: M829 @2km and PG-7V both stopped`, o('m829', 2000) !== 'PERFORATED' && o('pg7v', 0) !== 'PERFORATED', 0, 0, 'older threats defeated');
+  check(`${k}: has description + 'estimate' label`, /estimate/i.test(SCENARIOS[k].target) && !!SCENARIOS[k].desc, 0, 0, 'labeling'); }
 // 6. scenarios + performance
 let tmax = 0; for (const [k, sc] of Object.entries(SCENARIOS)) for (const pj of [sc.proj, 'm829a3', 'kornet', 'pg7v']) { const a = performance.now(); simulate({ proj: pj, range: sc.range, plates: sc.plates }); tmax = Math.max(tmax, performance.now() - a); }
 check('Max simulate() time per shot (ms)', tmax, 0, 50, 'interactive budget', x => x.toFixed(1));

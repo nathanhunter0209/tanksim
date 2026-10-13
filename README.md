@@ -7,7 +7,10 @@ Earlier versions: tag `v1-showroom` (tank showroom) and tag `v2-sandbox-complex`
 
 ## Using it: three steps
 1. **Round:** pick one from the dropdown (grouped by country). A spec line shows muzzle and impact velocity, rod length × diameter and mass.
-2. **Target:** Simple 300 mm RHA, Strv 103, T-72B + Kontakt-5, Leopard 2A6 wedge, Abrams hull front, or **Custom…**.
+2. **Target:** Simple 300 mm RHA, Strv 103, T-72B + Kontakt-5, Leopard 2A6 wedge, Abrams hull front, **T-90M + Relikt, Leopard 2A7, Challenger 3, Merkava Mk4 and M1A2 turret fronts**, or **Custom…**.
+   - The turret layouts are *public-estimate guesses*: layer types, thicknesses and angles were tuned so that their RHA-equivalent protection lands in the ranges quoted publicly (KE ~850–1000 mm, CE ~1000–1500+ mm).
+   - They are not real drawings. Each one shows a short description.
+   - `equiv.mjs` computes the KE and CE RHA-equivalent of any layout by bisection.
 3. **FIRE.** The camera auto-frames the rod and plates, the shot plays, and you get one big verdict, **PERFORATED / STOPPED / RICOCHET**, plus three numbers: impact velocity, armor LOS hit, and residual (or obliquity, for a ricochet).
 
 **Custom target:** tap a plate (in 3D or on its chip) to open a small popover with material, thickness and angle, plus a large delete button. Use **+ Add plate** to add more.
@@ -19,7 +22,7 @@ Earlier versions: tag `v1-showroom` (tank showroom) and tag `v2-sandbox-complex`
 - Per-plate results table and v/L-vs-time chart.
 - Save/Load (localStorage) and share links.
 
-On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v6`).
+On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v7`).
 
 ## Physics (physics.js): time-stepped along the shot line, runs in a few ms
 - **Geometry:** a ray/plate intersection gives the LOS and obliquity of every plate and rib.
@@ -68,4 +71,4 @@ Run `node validate.mjs`. It compares the model against public reference values a
 
 Some of these are calibration points rather than independent predictions: the nominal CE penetration and the RHA resistance.
 
-Files: `index.html`, `app.js` (scene, UI, playback), `physics.js`, `projectile.js`, `data.js`, `validate.mjs`, `sw.js`, `manifest.json`.
+Files: `equiv.mjs` (RHA-equivalent helper), `index.html`, `app.js` (scene, UI, playback), `physics.js`, `projectile.js`, `data.js`, `validate.mjs`, `sw.js`, `manifest.json`.

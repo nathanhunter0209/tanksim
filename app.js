@@ -106,7 +106,7 @@ $('pMat').innerHTML = Object.entries(mg).map(([g, ks]) => `<optgroup label="${g}
 $('round').onchange = e => setProj(e.target.value);
 $('target').onchange = e => { const v = e.target.value; if (v === 'custom') markCustom(); else loadScenario(v); };
 document.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { S.core = b.dataset.c; syncProjUI(); stale(); });
-function markCustom() { S.target = 'Custom'; $('target').value = 'custom'; $('custom').classList.add('show'); renderChips(); overlay(); }
+function markCustom() { $('tdesc').textContent = ''; S.target = 'Custom'; $('target').value = 'custom'; $('custom').classList.add('show'); renderChips(); overlay(); }
 function renderChips() { $('chips').innerHTML = S.plates.map((p, i) => `<button class="chip${i === S.sel ? ' on' : ''}" data-chip="${i}"><b>${i + 1}</b> ${MATERIALS[p.mat].name}<br><span class="hint">${p.t} mm · ${p.ax}°</span></button>`).join('');
   document.querySelectorAll('[data-chip]').forEach(b => b.onclick = e => { const r = b.getBoundingClientRect(); lastTap = [r.right + 10, r.top]; select(+b.dataset.chip); }); }
 let lastTap = [innerWidth / 2, innerHeight / 3];
@@ -288,7 +288,7 @@ function verdict() { const r = sim, ke = r.type === 'KE'; const los = r.plates.f
   $('verdict').classList.add('show'); }
 
 // ---------------- scenarios, save/load/share ----------------
-function loadScenario(k) { const sc = SCENARIOS[k]; S.plates = clone(sc.plates); S.target = sc.target; S.range = sc.range; S.sel = -1; setProj(sc.proj); buildPlates(); frame(); $('target').value = k; $('custom').classList.remove('show'); overlay(); }
+function loadScenario(k) { const sc = SCENARIOS[k]; S.plates = clone(sc.plates); S.target = sc.target; S.range = sc.range; S.sel = -1; setProj(sc.proj); buildPlates(); frame(); $('target').value = k; $('custom').classList.remove('show'); $('tdesc').textContent = sc.desc || ''; overlay(); }
 const setup = () => ({ proj: S.proj, core: S.core, D: S.D, L: S.L, pen: S.pen, v0: S.v0, range: S.range, target: S.target, plates: S.plates });
 function applySetup(o) { Object.assign(S, { proj: o.proj in PROJECTILES ? o.proj : 'm829a3', core: o.core in CORES ? o.core : 'du', D: +o.D || 22, L: +o.L || 800, pen: +o.pen || 500, v0: +o.v0 || 1500, range: +o.range || 0, target: String(o.target || 'Custom'), plates: (o.plates || []).filter(p => p.mat in MATERIALS).map(p => ({ mat: p.mat, x: +p.x || 0, y: +p.y || 0, z: +p.z || 0, t: +p.t || 10, ax: +p.ax || 0, ay: +p.ay || 0, w: +p.w || 1, h: +p.h || 1, ribs: +p.ribs || 0 })), sel: -1 }); syncProjUI(); buildPlates(); const sk = Object.keys(SCENARIOS).find(k => SCENARIOS[k].target === S.target); if (sk) { $('target').value = sk; $('custom').classList.remove('show'); } else markCustom(); frame(); }
 const store = () => { try { return JSON.parse(localStorage.getItem('armorSandbox.setups') || '{}'); } catch { return {}; } };
