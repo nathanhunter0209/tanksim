@@ -1,47 +1,29 @@
-# Tank Armor Lab: 3D armor / shell simulator (PWA)
+# Armor Plate Sandbox
 
-A self-contained browser simulator for tank armor and ammunition, styled as a dark sci-fi "lab" showroom. It uses Three.js r170, vendored in `vendor/` (no CDN). Everything runs client-side and works offline once it has been installed as a PWA.
+Engineering-style armor plate sandbox in the browser (Three.js r170, vendored, no build step). Live: https://nathanhunter0209.github.io/tanksim/
+The previous tank showroom is preserved at git tag `v1-showroom`.
 
-![desktop](screenshot.png)
-![exploded](screenshot-exploded.png)
+**All projectile and armor data are rough public estimates. The physics is a fast approximation, not a hydrocode. Use it for education and visualisation only.**
 
 ## Features
-- **Tanks**: M1A2 SEPv3, M1A3/M1E3 (**speculative**: the vehicle is unreleased and its data is guessed), Challenger 3, Merkava Mk4, Leopard 2A7, T-90M. All are procedural models with beveled plates, bolts, ERA tiles, instanced track links and edge highlights. Six camo schemes with procedural wear.
-- **Lab scene**: a reflective stage with a softened mirror, cyan/amber rim rings, backlit wall panels with tank silhouettes, light shafts, warm/cool spot lights and a custom HDR-like environment. Post-processing adds SSAO (GTAO), bloom, an optional depth of field and a vignette.
-- **Armor zones**: turret front, side, rear and roof; hull UFP, LFP, side, skirt, roof and rear. Each zone has layered RHA / composite / NERA / ERA / spaced / structure layers with separate **KE** and **CE** RHA-equivalent values.
-- **Ammunition**: M829A4, DM73-like and 3BM60 APFSDS; M830A1 HEAT; L31-type HESH; Kornet, TOW-2A and Javelin (top-attack) tandem ATGMs.
-- **Ballistics model**:
-  - Impact angle is measured against the true surface normal.
-  - Long-rod rounds get normalization, and armor thickness scales with line of sight.
-  - Ricochet and fuze-failure chances rise with angle.
-  - ERA weakens single-charge HEAT; a tandem round's precursor charge sets the ERA off first.
-  - HESH is defeated by spaced armor and composite, and causes spall on bare plate.
-  - APFSDS velocity and penetration fall off with range.
-- **Exploded armor view**: the layers of the struck zone separate along the shot axis as 3D slabs (translucent ceramic/composite, metal RHA, NERA sandwich, ERA bricks, dashed air gaps). Each slab has a cyan callout, the penetrator's path is animated through them, and the residual penetration is shown after each layer.
-- **HUD**: glassmorphism title card, shot analysis, a controls panel with pill toggles, an X-ray cutaway chart, filmstrip carousels of tanks (rendered thumbnails) and shells, circular buttons, and cinematic camera moves.
-- **Mobile / PWA**:
-  - Touch controls: tap to fire, drag to orbit, pinch to zoom, long-press for zone info.
-  - Responsive portrait and landscape layouts that respect iPhone safe areas.
-  - Phones default to Low quality.
-  - The service worker caches everything for offline use.
+- Light-grey engineering viewport, orbit camera, move/rotate gizmos on plates, section plane (hatched cut faces) with offset.
+- Projectile presets grouped by country (USA M774–M829A3, Germany DM13–DM53, USSR/Russia 3BM9–3BM60, RPG/ATGMs, shaped charge, tandem). Core materials: tungsten alloy, DU, 4340 steel and tungsten carbide. Sliders for rod diameter, rod length, velocity, range and playback length. Mass is computed from the generated geometry × density.
+- Procedural models: rods with ogive tip, buttress threads/sabot grooves, fins and tracer. RPG, ATGM and HEAT round shapes.
+- Material library: barrier, ERA (Kontakt-1/5, Relikt, Kaktus, Blazer, ERAWA-1/2), bulging NERA, spall liner, crew, engine bay, RHA/HHA/cast steel, aluminium, titanium, SiC, B4C, TiB2, alumina AD995, textolite, tungsten, DU. Each plate has sliders for thickness, angle X/Y, position, width, height and ribs.
+- Timeline playback with scrubber, pause and slow-mo. The rod visibly erodes, craters and holes form, debris flies, ERA flyer plates separate and NERA bulges. A velocity or temperature colour map with legend is applied to the rod, jet and debris.
+- Reference-style overlay (projectile, velocity, range, target) plus a scale bar. Results panel per plate (LOS, obliquity, residual length and velocity, perforated or not, notes) and a velocity / rod-length vs time chart.
+- Scenarios: Strv 103 40mm @78° + ribs, Abrams hull front (public estimate), T-72B + Kontakt-5, Leopard 2A6 wedge, Simple 300mm RHA. Save/Load to localStorage, share via URL hash.
+- PWA (offline cache `tanksim-v4`), touch drawers on phones, Low quality on mobile.
 
-> **Armor and penetration values are rough public estimates** taken from open sources. Real figures are classified. This is an educational toy, not an accurate model.
+## Physics (physics.js, pure JS)
+- Ray/plate intersection gives the LOS thickness and obliquity for each plate (including ribs).
+- **KE:** Tate–Alekseevskii erosion integrated in time. The target resistance is calibrated each shot so that the semi-infinite RHA result matches **Lanz–Odermatt** (L/D, density, hardness). Materials are scaled by thickness-efficiency factors, and a cos^0.224 obliquity term is applied.
+  - Ricochet uses a Tate-style critical angle; ribs lower it. Yaw is induced near the critical angle.
+  - Ceramics: interface dwell.
+  - ERA: rod length loss plus yaw.
+  - NERA: disruption.
+  - Thin plates: back-face break-out.
+- **CE:** jet capacity with a standoff efficiency curve. ERA cuts the jet unless a tandem precursor initiates it first, and NERA disrupts it.
+- Spall/debris cone after each perforation (narrower behind a spall liner). Behind-armor residual is given in mm RHA.
 
-## Run locally
-ES modules need HTTP, so the page won't run if you open the file directly:
-```bash
-cd tanksim && python3 -m http.server 8000
-# open http://localhost:8000
-```
-On an iPhone, open the page over HTTPS in Safari, then tap Share → **Add to Home Screen**.
-
-## Deploy to GitHub Pages
-1. Create a GitHub repo and push this folder (`git remote add origin … && git push -u origin main`).
-2. In the repo, go to **Settings → Pages → Build and deployment**, set **Source: Deploy from a branch**, then choose **Branch: main / (root)**.
-3. The site is served at `https://<user>.github.io/<repo>/`. All paths are relative, so it works from a subpath. Pages serves over HTTPS, so the PWA and service worker work.
-4. After changing any files, bump `CACHE` in `sw.js` (e.g. `tanksim-v3`) so installed clients update.
-
-## Files
-`index.html` (UI/CSS) · `main.js` (app, picking, FX, HUD) · `lab.js` (environment) · `models.js` (procedural tanks) · `exploded.js` (exploded view) · `thumbs.js` (thumbnails) · `ballistics.js` · `data.js` (armor/shell data) · `sw.js` · `manifest.json` · `icons/`
-
-Note: `vendor/jsm/postprocessing/GTAOPass.js` is patched so that sprites, particles and FX meshes are skipped in the AO normal pass.
+Files: `index.html`, `app.js` (scene/UI/playback), `physics.js`, `projectile.js`, `data.js`, `sw.js`, `manifest.json`.

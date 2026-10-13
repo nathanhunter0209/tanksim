@@ -1,126 +1,87 @@
-// All armor/penetration figures are rough PUBLIC ESTIMATES (open-source literature, forums,
-// manufacturer marketing). Real values are classified. Values are RHA-equivalent (mm) at
-// normal incidence per layer, given separately vs KE (APFSDS) and CE (HEAT/shaped charge).
-// Layer types: RHA, composite, ceramic, NERA, ERA, spaced, steel(structure/engine)
-export const DISCLAIMER = 'All values are approximate public estimates (RHAe mm). Real figures are classified.';
+// Projectile, material and scenario data. ALL VALUES ARE ROUGH PUBLIC ESTIMATES / APPROXIMATIONS
+// (open literature, forums, marketing). Real figures are classified. For education/visualisation only.
+export const DISCLAIMER = 'Approximate model. All projectile and armor data are rough public estimates, not real (classified) values.';
 
-const L = (name, type, ke, ce, mm) => ({ name, type, ke, ce, mm });
-
-function stdZones(o) { return o; }
-
-export const TANKS = {
-  m1a2: {
-    name: 'M1A2 SEPv3 Abrams', color: 0xa08d62, speculative: false,
-    style: 'abrams', len: 7.9, width: 3.66, wheels: 7, barrel: 5.3, sprocket: 'rear',
-    zones: stdZones({
-      turretFront: [L('Outer steel face', 'RHA', 60, 60, 50), L('NERA / DU composite array', 'NERA', 640, 1080, 600), L('Inner RHA backing', 'RHA', 220, 220, 120)],
-      turretSide:  [L('Side plate', 'RHA', 60, 60, 60), L('Composite cheek', 'composite', 260, 460, 300), L('Inner wall', 'RHA', 80, 80, 50)],
-      turretRear:  [L('Bustle rack (ammo box, blow-out panels)', 'spaced', 20, 60, 400), L('Rear plate', 'RHA', 50, 50, 50)],
-      turretRoof:  [L('Roof plate', 'RHA', 50, 50, 50)],
-      ufp:         [L('Glacis plate (steep, thin)', 'RHA', 60, 60, 50), L('Fuel cells / spacing', 'spaced', 10, 40, 300), L('Inner bulkhead', 'RHA', 30, 30, 25)],
-      lfp:         [L('Outer steel', 'RHA', 50, 50, 40), L('Composite array', 'composite', 480, 700, 450), L('Inner RHA', 'RHA', 120, 120, 80)],
-      hullSide:    [L('Hull side plate', 'RHA', 40, 40, 30), L('Fuel tank / spacing', 'spaced', 0, 50, 300), L('Inner wall', 'RHA', 30, 30, 25)],
-      skirt:       [L('Composite skirt (front 1/3)', 'composite', 70, 260, 90), L('Air gap', 'spaced', 0, 120, 400), L('Hull side', 'RHA', 40, 40, 30)],
-      hullRoof:    [L('Engine deck', 'RHA', 30, 30, 30)],
-      hullRear:    [L('Engine / grille (AGT1500 bulk)', 'steel', 60, 100, 800), L('Rear plate', 'RHA', 30, 30, 30)],
-    }),
-  },
-  m1a3: {
-    name: 'M1A3 / M1E3 Abrams (SPECULATIVE)', color: 0x9c9a74, speculative: true,
-    style: 'abrams3', len: 7.6, width: 3.6, wheels: 7, barrel: 5.3, sprocket: 'rear',
-    zones: {
-      turretFront: [L('Outer face + APS sensors', 'RHA', 50, 50, 40), L('Next-gen NERA/ceramic (speculated)', 'NERA', 700, 1150, 550), L('Inner backing', 'RHA', 200, 200, 100)],
-      turretSide:  [L('Side plate', 'RHA', 50, 50, 50), L('Composite cheek (guess)', 'composite', 280, 500, 280), L('Inner wall', 'RHA', 70, 70, 45)],
-      turretRear:  [L('Bustle / unmanned-turret magazine (guess)', 'spaced', 20, 60, 380), L('Rear plate', 'RHA', 50, 50, 50)],
-      turretRoof:  [L('Roof w/ top-attack add-on (guess)', 'composite', 90, 200, 90)],
-      ufp:         [L('Glacis', 'RHA', 60, 60, 50), L('Spacing', 'spaced', 10, 40, 300), L('Bulkhead', 'RHA', 30, 30, 25)],
-      lfp:         [L('Outer steel', 'RHA', 50, 50, 40), L('Composite array (guess)', 'composite', 520, 760, 450), L('Inner RHA', 'RHA', 120, 120, 80)],
-      hullSide:    [L('Hull side', 'RHA', 40, 40, 30), L('Spacing', 'spaced', 0, 50, 300), L('Inner wall', 'RHA', 30, 30, 25)],
-      skirt:       [L('Reactive / composite skirt (guess)', 'ERA', 60, 450, 100), L('Air gap', 'spaced', 0, 120, 400), L('Hull side', 'RHA', 40, 40, 30)],
-      hullRoof:    [L('Deck', 'RHA', 35, 35, 35)],
-      hullRear:    [L('Hybrid powerpack (guess)', 'steel', 50, 90, 700), L('Rear plate', 'RHA', 30, 30, 30)],
-    },
-  },
-  ch3: {
-    name: 'Challenger 3', color: 0x4f5a3a, speculative: false,
-    style: 'chally', len: 8.3, width: 3.5, wheels: 6, barrel: 6.6, sprocket: 'rear',
-    zones: {
-      turretFront: [L('Outer steel', 'RHA', 60, 60, 50), L('Dorchester-derived modular array (Farnborough)', 'composite', 620, 1050, 600), L('Inner RHA', 'RHA', 200, 200, 120)],
-      turretSide:  [L('Add-on module', 'composite', 120, 300, 120), L('Side plate', 'RHA', 80, 80, 70), L('Inner wall', 'RHA', 60, 60, 40)],
-      turretRear:  [L('Stowage basket', 'spaced', 5, 60, 400), L('Rear plate', 'RHA', 50, 50, 50)],
-      turretRoof:  [L('Roof + top-attack kit', 'composite', 70, 160, 80)],
-      ufp:         [L('Glacis', 'RHA', 70, 70, 60), L('Composite insert', 'composite', 300, 450, 250), L('Inner', 'RHA', 40, 40, 30)],
-      lfp:         [L('Dorchester LFP array', 'composite', 500, 750, 450), L('Inner RHA', 'RHA', 100, 100, 70)],
-      hullSide:    [L('Hull side', 'RHA', 50, 50, 40), L('Spacing', 'spaced', 0, 50, 250), L('Inner wall', 'RHA', 30, 30, 25)],
-      skirt:       [L('Composite / bar skirt', 'composite', 80, 300, 100), L('Air gap', 'spaced', 0, 120, 400), L('Hull side', 'RHA', 50, 50, 40)],
-      hullRoof:    [L('Deck', 'RHA', 35, 35, 35)],
-      hullRear:    [L('CV12 engine pack', 'steel', 60, 100, 800), L('Rear plate', 'RHA', 30, 30, 30)],
-    },
-  },
-  merk4: {
-    name: 'Merkava Mk4 (Barak/M)', color: 0x8d8a6e, speculative: false,
-    style: 'merkava', len: 9.0, width: 3.72, wheels: 6, barrel: 5.3, sprocket: 'front',
-    zones: {
-      turretFront: [L('Modular wedge cover', 'RHA', 80, 80, 60), L('Modular composite (very long LOS)', 'composite', 600, 1050, 800), L('Inner RHA', 'RHA', 240, 240, 140)],
-      turretSide:  [L('Modular side armor', 'composite', 200, 450, 250), L('Side plate', 'RHA', 80, 80, 60)],
-      turretRear:  [L('Ball-and-chain curtain', 'spaced', 10, 120, 200), L('Rear bustle', 'RHA', 60, 60, 50)],
-      turretRoof:  [L('Roof plate', 'RHA', 60, 60, 60)],
-      ufp:         [L('Glacis', 'RHA', 60, 60, 50), L('Spaced/composite insert', 'composite', 250, 420, 300), L('Front-mounted engine (MT883)', 'steel', 150, 300, 1000), L('Bulkhead', 'RHA', 40, 40, 30)],
-      lfp:         [L('Composite LFP', 'composite', 350, 600, 350), L('Engine/transmission bulk', 'steel', 150, 300, 900), L('Bulkhead', 'RHA', 40, 40, 30)],
-      hullSide:    [L('Hull side', 'RHA', 60, 60, 50), L('Spacing', 'spaced', 0, 60, 250), L('Inner wall', 'RHA', 30, 30, 25)],
-      skirt:       [L('Heavy composite skirt', 'composite', 100, 350, 120), L('Air gap', 'spaced', 0, 120, 400), L('Hull side', 'RHA', 60, 60, 50)],
-      hullRoof:    [L('Deck', 'RHA', 40, 40, 40)],
-      hullRear:    [L('Rear door / ammo racks', 'RHA', 50, 50, 50), L('Crew compartment (no engine)', 'spaced', 0, 0, 500)],
-    },
-  },
-  leo2a7: {
-    name: 'Leopard 2A7', color: 0x4a5636, speculative: false,
-    style: 'leo', len: 7.7, width: 3.75, wheels: 7, barrel: 6.6, sprocket: 'rear',
-    zones: {
-      turretFront: [L('Spaced wedge add-on', 'NERA', 150, 300, 300), L('Main composite (B-tech)', 'composite', 600, 950, 600), L('Inner RHA', 'RHA', 180, 180, 100)],
-      turretSide:  [L('Side add-on', 'composite', 150, 300, 150), L('Side plate', 'RHA', 60, 60, 50)],
-      turretRear:  [L('Bustle stowage', 'spaced', 10, 60, 400), L('Ammo bustle wall', 'RHA', 50, 50, 50)],
-      turretRoof:  [L('Roof + top kit', 'composite', 60, 140, 70)],
-      ufp:         [L('Glacis', 'RHA', 60, 60, 50), L('Spacing', 'spaced', 10, 40, 250), L('Inner', 'RHA', 30, 30, 25)],
-      lfp:         [L('LFP composite', 'composite', 500, 750, 450), L('Inner RHA', 'RHA', 100, 100, 70)],
-      hullSide:    [L('Hull side', 'RHA', 40, 40, 30), L('Spacing', 'spaced', 0, 40, 250), L('Inner', 'RHA', 30, 30, 25)],
-      skirt:       [L('Heavy skirt (front)', 'composite', 80, 280, 100), L('Air gap', 'spaced', 0, 120, 400), L('Hull side', 'RHA', 40, 40, 30)],
-      hullRoof:    [L('Deck', 'RHA', 30, 30, 30)],
-      hullRear:    [L('MTU MB873 engine', 'steel', 60, 100, 800), L('Rear plate', 'RHA', 30, 30, 30)],
-    },
-  },
-  t90m: {
-    name: 'T-90M Proryv', color: 0x55603a, speculative: false,
-    style: 't90', len: 6.9, width: 3.78, wheels: 6, barrel: 6.0, sprocket: 'rear',
-    zones: {
-      turretFront: [L('Relikt heavy ERA', 'ERA', 250, 650, 250), L('Steel / NERA welded turret', 'NERA', 500, 750, 500), L('Inner RHA', 'RHA', 100, 100, 60)],
-      turretSide:  [L('Relikt side ERA', 'ERA', 120, 450, 150), L('Turret side', 'RHA', 120, 120, 100)],
-      turretRear:  [L('Bustle (new ammo box)', 'spaced', 10, 80, 400), L('Rear plate', 'RHA', 60, 60, 60)],
-      turretRoof:  [L('Roof with partial ERA', 'ERA', 0, 300, 60), L('Roof plate', 'RHA', 50, 50, 50)],
-      ufp:         [L('Relikt ERA', 'ERA', 250, 650, 250), L('Steel-composite-steel glacis', 'composite', 450, 600, 220), L('Inner', 'RHA', 50, 50, 40)],
-      lfp:         [L('Lower plate (no ERA)', 'RHA', 120, 120, 80), L('Rubber/fuel tanks', 'spaced', 0, 40, 300)],
-      hullSide:    [L('Hull side', 'RHA', 70, 70, 70), L('Autoloader carousel / fuel', 'spaced', 0, 30, 300)],
-      skirt:       [L('Relikt side skirt ERA', 'ERA', 80, 400, 80), L('Air gap', 'spaced', 0, 60, 300), L('Hull side', 'RHA', 70, 70, 70)],
-      hullRoof:    [L('Deck', 'RHA', 25, 25, 25)],
-      hullRear:    [L('Slat armor', 'spaced', 0, 100, 300), L('V-92S2F engine', 'steel', 50, 80, 700), L('Rear plate', 'RHA', 40, 40, 40)],
-    },
-  },
+// Penetrator core materials: density kg/m3, dynamic strength Yp (Pa), Lanz-Odermatt constants
+export const CORES = {
+  wha: { name: 'Tungsten alloy', rho: 17600, Y: 1.4e9, lo: { a: .994, c0: 134.5, c1: -.148 } },
+  du: { name: 'Depleted uranium', rho: 18600, Y: 1.3e9, lo: { a: .994, c0: 134.5, c1: -.148 }, bonus: 1.06 },
+  steel: { name: '4340 steel', rho: 7850, Y: .9e9, lo: { a: 1.104, c0: 9874, c1: 0, k: 1 } },
+  wc: { name: 'Tungsten carbide', rho: 15000, Y: 2.2e9, lo: { a: .94, c0: 134.5, c1: -.148 }, brittle: 1 },
+};
+// KE: rod diameter D (mm), rod length L (mm), gun caliber (mm), muzzle velocity, velocity loss (fraction per km)
+const KE = (name, country, cal, D, L, core, v0, fins = 6, kloss = .04) => ({ name, country, type: 'KE', cal, D, L, core, v0, fins, kloss });
+// CE: warhead caliber (mm), nominal jet penetration at optimal standoff (mm RHA), flight speed, tandem precursor
+const CE = (name, country, cal, pen, v0, kind, tandem = false) => ({ name, country, type: 'CE', cal, pen, v0, kind, tandem, core: 'cu' });
+export const PROJECTILES = {
+  m774: KE('M774', 'USA', 105, 27, 400, 'du', 1508),
+  m833: KE('M833', 'USA', 105, 26, 460, 'du', 1494),
+  m829: KE('M829', 'USA', 120, 27, 545, 'du', 1670),
+  m829a1: KE('M829A1', 'USA', 120, 24, 684, 'du', 1575),
+  m829a2: KE('M829A2', 'USA', 120, 24, 684, 'du', 1680),
+  m829a3: KE('M829A3', 'USA', 120, 22, 800, 'du', 1555),
+  dm13: KE('DM13', 'Germany', 105, 38, 380, 'wc', 1455),
+  dm23: KE('DM23', 'Germany', 105, 32, 420, 'wha', 1455),
+  dm33: KE('DM33', 'Germany', 120, 28, 480, 'wha', 1650),
+  dm43: KE('DM43', 'Germany', 120, 26, 570, 'wha', 1740),
+  dm53: KE('DM53', 'Germany', 120, 25, 745, 'wha', 1670),
+  '3bm9': KE('3BM9', 'USSR/Russia', 125, 40, 380, 'steel', 1785, 5, .08),
+  '3bm22': KE('3BM22', 'USSR/Russia', 125, 36, 400, 'wc', 1760, 5),
+  '3bm32': KE('3BM32', 'USSR/Russia', 125, 32, 570, 'du', 1700, 5),
+  '3bm42': KE('3BM42', 'USSR/Russia', 125, 30, 570, 'wha', 1700, 5),
+  '3bm46': KE('3BM46', 'USSR/Russia', 125, 28, 635, 'du', 1700, 5),
+  '3bm60': KE('3BM60', 'USSR/Russia', 125, 28, 740, 'du', 1660, 5),
+  pg7v: CE('PG-7V (RPG-7)', 'ATGM/RPG', 85, 300, 120, 'rpg'),
+  pg7vr: CE('PG-7VR (RPG-7)', 'ATGM/RPG', 105, 650, 120, 'rpg', true),
+  tow2a: CE('TOW-2A (BGM-71E)', 'ATGM/RPG', 152, 900, 280, 'atgm', true),
+  pars3: CE('PARS 3 LR', 'ATGM/RPG', 150, 1000, 230, 'atgm', true),
+  javelin: CE('Javelin (FGM-148)', 'ATGM/RPG', 127, 750, 150, 'atgm', true),
+  kornet: CE('9M133 Kornet', 'ATGM/RPG', 152, 1150, 250, 'atgm', true),
+  m830a1: CE('M830A1 HEAT-MP', 'Shaped charge', 120, 480, 1400, 'heat'),
+  sc: CE('Generic shaped charge', 'Shaped charge', 100, 500, 300, 'heat'),
+  tandem: CE('Generic tandem', 'Shaped charge', 130, 800, 250, 'atgm', true),
 };
 
-// Penetration (RHA mm @ normal) – public estimates. KE values are referenced at 2 km.
-export const SHELLS = {
-  m829a4: { name: 'M829A4 APFSDS (120mm, US)', type: 'APFSDS', pen2km: 800, v0: 1650, drop: 60, color: 0xffaa33, norm: 2 },
-  dm73:   { name: 'DM73-like APFSDS (120mm L55A1)', type: 'APFSDS', pen2km: 760, v0: 1750, drop: 62, color: 0xffcc44, norm: 2 },
-  svinets:{ name: '3BM60 Svinets-2 APFSDS (125mm)', type: 'APFSDS', pen2km: 640, v0: 1660, drop: 70, color: 0xff7733, norm: 3 },
-  m830a1: { name: 'M830A1 MPAT HEAT (120mm)', type: 'HEAT', pen: 600, v0: 1410, drop: 110, color: 0xff5522 },
-  hesh:   { name: 'L31-type HESH (120mm)', type: 'HESH', pen: 0, plate: 130, v0: 670, drop: 90, color: 0xff3311 },
-  kornet: { name: '9M133 Kornet ATGM (tandem HEAT)', type: 'TANDEM', pen: 1200, v0: 300, drop: 0, color: 0xff2200 },
-  tow2a:  { name: 'TOW-2A ATGM (tandem HEAT)', type: 'TANDEM', pen: 950, v0: 280, drop: 0, color: 0xff2200 },
-  javelin:{ name: 'FGM-148 Javelin (tandem, top-attack)', type: 'TANDEM', pen: 800, v0: 200, drop: 0, color: 0xff2200, topAttack: true },
+// Armor materials. te = thickness efficiency vs RHA (per mm) for KE / CE. era/nera = special behaviour.
+// era: { ke: rod length fraction removed, ce: jet fraction removed, yaw }  dwell: ceramic interface defeat
+const M = (name, group, rho, te, tc, color, extra = {}) => ({ name, group, rho, te, tc, color, ...extra });
+export const MATERIALS = {
+  barrier: M('Barrier', 'Barriers', 7850, 1, 1, '#9aa3ab', { desc: 'An ordinary barrier: RHA-like, material and thickness set separately.' }),
+  k1: M('Kontakt-1 (4S20)', 'Reactive armour', 2500, .2, .3, '#c9a14a', { era: { ke: .03, ce: .55, yaw: .05 }, desc: 'Light ERA vs shaped charges. Little effect on APFSDS.' }),
+  k5: M('Kontakt-5 (4S22)', 'Reactive armour', 3500, .35, .4, '#b5803a', { era: { ke: .28, ce: .6, yaw: .25 }, desc: 'Heavy ERA, 15mm flyer plate: erodes/yaws long rods.' }),
+  relikt: M('Relikt (4S23)', 'Reactive armour', 3500, .35, .4, '#a8743a', { era: { ke: .42, ce: .7, yaw: .3 }, desc: 'Two-flyer heavy ERA (estimate).' }),
+  kaktus: M('Kaktus (4S24)', 'Reactive armour', 3800, .4, .5, '#9b6a36', { era: { ke: .38, ce: .72, yaw: .28 }, desc: 'Heavy ERA, prototype (estimate).' }),
+  blazer: M('Blazer', 'Reactive armour', 2300, .15, .25, '#d0b060', { era: { ke: .02, ce: .5, yaw: .03 }, desc: 'Israeli light ERA (estimate).' }),
+  erawa1: M('ERAWA-1', 'Reactive armour', 2500, .2, .3, '#c49a5a', { era: { ke: .05, ce: .55, yaw: .06 }, desc: 'Polish light ERA (estimate).' }),
+  erawa2: M('ERAWA-2', 'Reactive armour', 2700, .22, .32, '#b88f50', { era: { ke: .1, ce: .62, yaw: .1 }, desc: 'Polish ERA, double layer (estimate).' }),
+  nera: M('Bulging NERA package', 'Bulging armour', 4200, .55, 1.3, '#7f9cb0', { nera: { ke: .1, ce: .18 }, desc: 'Steel/rubber/steel sandwich that bulges into the path (generic estimate).' }),
+  nera2: M('Thin NERA package 3/9/5', 'Bulging armour', 3800, .5, 1.2, '#8fb0c4', { nera: { ke: .07, ce: .16 }, desc: '3mm steel / 9mm rubber / 5mm steel sandwich (generic).' }),
+  liner: M('Spall liner', 'Behind armour', 1400, .12, .2, '#e5d36b', { liner: true, desc: 'Aramid liner, narrows the behind-armor debris cone.' }),
+  crew: M('Crew compartment', 'Behind armour', 50, 0, 0, '#f2c0c0', { crew: true, desc: 'Marker volume: residual reaching here is counted as a crew hit.' }),
+  engine: M('Engine bay', 'Modules', 1500, .12, .2, '#7a7a6a', { desc: 'Bulk machinery, low density (rough estimate).' }),
+  rha: M('RHA steel', 'Steels', 7850, 1, 1, '#8f989f', { bhn: 270 }),
+  hha: M('HHA steel', 'Steels', 7850, 1.15, 1.0, '#a3a9b0', { bhn: 500 }),
+  cast: M('Cast steel', 'Steels', 7800, .9, .9, '#7e858a', { bhn: 240 }),
+  alu: M('Aluminium 5083', 'Light alloys', 2660, .32, .4, '#c6ccd2'),
+  ti: M('Titanium Ti-6Al-4V', 'Light alloys', 4430, .62, .6, '#b0b6c8'),
+  sic: M('SiC ceramic', 'Ceramics', 3200, .95, 1.25, '#5c6066', { dwell: 1 }),
+  b4c: M('Boron carbide B4C', 'Ceramics', 2520, .8, 1.1, '#3f4247', { dwell: 1.1 }),
+  tib2: M('Titanium diboride TiB2', 'Ceramics', 4500, 1.3, 1.4, '#6e6a7c', { dwell: 1.2 }),
+  al2o3: M('Alumina AD995', 'Ceramics', 3900, .85, 1.3, '#e8e4da', { dwell: .8 }),
+  textolite: M('Textolite (GRP)', 'Composites', 1800, .25, .45, '#cdb48a'),
+  tungsten: M('Tungsten', 'Heavy metals', 17600, 1.6, 1.9, '#565b60'),
+  du: M('Depleted uranium', 'Heavy metals', 19000, 1.8, 2.0, '#4c5047'),
 };
 
-export const ZONE_NAMES = {
-  turretFront: 'Turret front', turretSide: 'Turret side', turretRear: 'Turret rear / bustle', turretRoof: 'Turret roof',
-  ufp: 'Hull UFP', lfp: 'Hull LFP', hullSide: 'Hull side', skirt: 'Side skirt', hullRoof: 'Hull roof / deck', hullRear: 'Hull rear',
+// Plate: x (m, along shot), y, z, t (mm), ax (deg, tilt back about Z), ay (deg, yaw about Y), w, h (m), mat, ribs
+const P = (mat, x, t, ax = 0, ay = 0, w = 1.2, h = 1, extra = {}) => ({ mat, x, y: 0, z: 0, t, ax, ay, w, h, ...extra });
+export const SCENARIOS = {
+  strv103: { name: 'Strv 103 40mm @78° + ribs', target: 'Strv 103A/B (40mm RHA @78° +ribs)', proj: '3bm9', range: 1000, plates: [P('rha', 0, 40, 78, 0, 1.2, 1.6, { ribs: 6 })] },
+  abrams: { name: 'Abrams hull front special armor (public estimate)', target: 'M1 hull front special armor (public estimate)', proj: '3bm60', range: 1000,
+    plates: [P('hha', 0, 50, 70, 0, 1.2, 1.2), P('nera', .25, 120, 45), P('nera', .45, 120, 45), P('nera', .65, 120, 45), P('rha', .9, 40, 30), P('rha', 1.05, 60, 10), P('liner', 1.18, 20, 10), P('crew', 1.6, 300, 0, 0, 1.2, 1.2)] },
+  t72b: { name: 'T-72B turret with Kontakt-5', target: 'T-72B turret cheek + Kontakt-5 (public estimate)', proj: 'm829a1', range: 1500,
+    plates: [P('k5', 0, 60, 55), P('cast', .3, 80, 30), P('textolite', .42, 30, 30), P('nera2', .5, 90, 30), P('nera2', .6, 90, 30), P('cast', .78, 180, 30), P('crew', 1.4, 300)] },
+  leo2a6: { name: 'Leopard 2A6 wedge', target: 'Leopard 2A6 turret front with add-on wedge (public estimate)', proj: '3bm42', range: 1500,
+    plates: [P('hha', 0, 20, 60), P('hha', .35, 20, 60), P('rha', .9, 40), P('nera', 1.0, 110, 10), P('nera', 1.15, 110, 10), P('nera', 1.3, 110, 10), P('sic', 1.45, 60), P('rha', 1.55, 80), P('crew', 2.1, 300)] },
+  rha300: { name: 'Simple 300mm RHA', target: '300mm RHA plate @0°', proj: 'm829a3', range: 1000, plates: [P('rha', 0, 300, 0, 0, 1, 1)] },
 };
-export const LAYER_COLORS = { RHA: '#8a9099', composite: '#c9a227', ceramic: '#e8e2d0', NERA: '#4fa3d1', ERA: '#d9534f', spaced: '#3a4a3a', steel: '#6b5a4a' };
