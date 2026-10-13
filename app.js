@@ -13,6 +13,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { runSweep, drawSweep, sweepSummary } from './sweep.js';
 const embed = new URLSearchParams(location.search).has('embed'); if (embed) document.body.classList.add('embed');
@@ -27,7 +29,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, quality === 'high' ? 2 : 1)); 
 renderer.localClippingEnabled = true; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = quality === 'high'; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0xc9cbcd);
-const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), .04).texture; scene.environmentIntensity = .7;
+const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), .04).texture; scene.environmentIntensity = .85; // tuned for crisper metal reflections
 const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, .01, 100);
 const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
 const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(2, 5, 4); key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
@@ -40,9 +42,12 @@ const grid = new THREE.GridHelper(20, 100, 0xa9adb1, 0xb3b7ba); grid.material.tr
 // soft contact shadows under each plate (cheap radial blobs)
 const blobTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(.5, 'rgba(0,0,0,.25)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c); })();
 const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, opacity: .8 }), contactGroup = new THREE.Group(); scene.add(contactGroup);
-let composer = null, bloom = null;
+let composer = null, bloom = null, gtao = null, bokeh = null;
 function setupComposer() { composer?.dispose?.(); composer = null; if (quality !== 'high') return; composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, camera));
-  bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .6, .45, 1.0); composer.addPass(bloom); composer.addPass(new OutputPass()); } // bloom only picks up HDR (>1) hot metal / jet / tracer
+  gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); gtao.blendIntensity = .65; gtao.updateGtaoMaterial({ radius: .18, distanceFallOff: 1, thickness: 1, samples: 8 }); gtao.updatePdMaterial({ samples: 6, rings: 2, radius: 6 }); const gs = gtao.setSize.bind(gtao); gtao.setSize = (w, h) => gs(Math.ceil(w / 2), Math.ceil(h / 2)); gtao.setSize(innerWidth, innerHeight); /* half-res AO: cheap */ composer.addPass(gtao); // SSAO (ground-truth AO), High only
+  bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .6, .45, 1.0); composer.addPass(bloom);
+  bokeh = new BokehPass(scene, camera, { focus: 1, aperture: .004, maxblur: .008 }); bokeh.enabled = false; composer.addPass(bokeh); // depth of field, only during impact auto-zoom
+  composer.addPass(new OutputPass()); } // bloom only picks up HDR (>1) hot metal / jet / tracer
 const shotLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-3, 0, 0), new THREE.Vector3(4, 0, 0)]), new THREE.LineDashedMaterial({ color: 0x5577aa, dashSize: .03, gapSize: .03, transparent: true, opacity: .5 })); shotLine.computeLineDistances(); scene.add(shotLine);
 
 // section plane (keeps z < offset), hatch cap trick on back faces
@@ -76,12 +81,14 @@ function rodMat(color, rough, metal) {
 
 // ---------------- state ----------------
 const S = { proj: 'm829a3', core: 'du', D: 22, L: 800, pen: 500, v0: 1555, range: 1000, plates: [], target: '', mapMode: 0, sel: -1 };
+let shakeOn = true, shakeUntil = 0, impactSeen = false; const shakeOff = new THREE.Vector3();
 let impactZoom = true, izState = null, inspecting = false, plateMeshes = [], sim = null, simT = 0, playing = false, speed = 1, built = null;
 const clone = o => JSON.parse(JSON.stringify(o));
 
 // ---------------- plates ----------------
 const plateGroup = new THREE.Group(); scene.add(plateGroup);
-const edgeMat = new THREE.LineBasicMaterial({ color: 0x2a2e33, transparent: true, opacity: .3 });
+const edgeMat = new THREE.LineBasicMaterial({ color: 0xc9ccd0, transparent: true, opacity: .32 }); // light worn-edge highlight along chamfers
+const boltGeo = new THREE.CylinderGeometry(.006, .0068, .005, 10).rotateZ(Math.PI / 2), boltMat = new THREE.MeshStandardMaterial({ color: 0x5c5f52, roughness: .45, metalness: .8 });
 function buildPlates() {
   for (const m of plateMeshes) { plateGroup.remove(m); m.traverse(o => o.geometry?.dispose()); }
   plateMeshes = S.plates.map((p, i) => {
@@ -92,6 +99,10 @@ function buildPlates() {
     m.position.set(p.x, p.y, p.z); m.rotation.order = 'YZX'; m.rotation.set(0, THREE.MathUtils.degToRad(p.ay), THREE.MathUtils.degToRad(p.ax));
     const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat); e.raycast = () => {}; m.add(e);
     for (const r of ribBoxes(p)) { const rb = new THREE.Mesh(new THREE.BoxGeometry(r.half[0] * 2, r.half[1] * 2, r.half[2] * 2), m.material); rb.position.set(...r.off); rb.castShadow = true; rb.userData.i = i; m.add(rb); const re = new THREE.LineSegments(new THREE.EdgesGeometry(rb.geometry), edgeMat); re.raycast = () => {}; rb.add(re); }
+    if (quality === 'high' && mat.era) { const k = 5, b = new THREE.InstancedMesh(boltGeo, boltMat, 2 * k * k), M4 = new THREE.Matrix4(); let n = 0; // bolt heads at brick corners (front face)
+      for (let a = 0; a < k; a++) for (let c = 0; c < k; c++) for (const dz of [-.32, .32]) M4.setPosition(-tt / 2 - .002, (a + .5) / k * p.h - p.h / 2 + .3 * p.h / k, (c + .5) / k * p.w - p.w / 2 + dz * p.w / k), b.setMatrixAt(n++, M4);
+      b.raycast = () => {}; b.castShadow = false; m.add(b); }
+    for (const r of ribBoxes(p)) if (quality === 'high') { const b = new THREE.InstancedMesh(boltGeo, boltMat, 6), M4 = new THREE.Matrix4(); for (let j = 0; j < 6; j++) M4.setPosition(r.off[0] - r.half[0] - .002, r.off[1] + (j % 2 - .5) * r.half[1], r.off[2] + (Math.floor(j / 2) - 1) * r.half[2] * .8), b.setMatrixAt(j, M4); b.raycast = () => {}; m.add(b); } // spacer/rib bolts
     plateGroup.add(m); return m;
   });
   contactGroup.clear(); for (const p of S.plates) { if (MATERIALS[p.mat].crew) continue; const ex = Math.abs(p.h * Math.sin(THREE.MathUtils.degToRad(p.ax))) + p.t / 1000 + .25;
@@ -158,7 +169,7 @@ let autoFrame = true; $('autoF').onclick = () => { autoFrame = !autoFrame; $('au
 $('rview').onclick = () => frame(); $('insp').onclick = () => inspect(); $('qual').onclick = () => setQuality(quality === 'high' ? 'low' : 'high');
 $('pp').onclick = () => togglePlay(); $('fire').onclick = () => fire();
 document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { speed = +b.dataset.sp; document.querySelectorAll('[data-sp]').forEach(x => x.classList.toggle('on', x === b)); });
-$('scrub').oninput = e => { if (!sim) return; playing = false; $('pp').textContent = '▶'; simT = +e.target.value / 1000 * sim.tEnd; };
+$('scrub').oninput = e => { if (!sim) return; playing = false; $('pp').textContent = '▶'; simT = +e.target.value / 1000 * sim.tEnd; if (simT >= sim.tEnd) { updateSim(); verdict(); } }; // scrubbing to the end shows the result at once
 function toggleSection(v = !sectionOn) { sectionOn = v; $('sec').textContent = 'Section: ' + (v ? 'on' : 'off'); $('sec').classList.toggle('on', v); for (const m of clipMats) { m.clippingPlanes = clipList(m); m.needsUpdate = true; } }
 function togglePlay() { if (!sim) return; playing = !playing; if (playing && simT >= sim.tEnd) simT = 0; $('pp').textContent = playing ? '❚❚' : '▶'; }
 function setQuality(q) { quality = q; $('qual').textContent = 'Quality: ' + (q === 'high' ? 'High' : 'Low'); renderer.setPixelRatio(Math.min(devicePixelRatio, q === 'high' ? 2 : 1)); renderer.setSize(innerWidth, innerHeight);
@@ -220,7 +231,7 @@ function buildRod() {
 function placeRodIdle() { if (!rod) return; if (rod.sabot) { rod.sabot.petals.forEach(q => { q.piv.position.set(0, 0, 0); q.piv.rotation.set(0, 0, 0); }); } const first = Math.min(0, ...S.plates.map(p => p.x - p.t / 2000 - .1)); rod.group.position.set(first - .35, 0, 0); rod.group.rotation.set(0, 0, 0); rod.group.visible = true; if (rod.sabot) { rod.sabot.group.position.set(first - .35 + rod.sabot.group.userData.offset, 0, 0); rod.sabot.group.visible = true; } tipPlane.constant = 1e3; mapU.uOn.value = 0; }
 let holes = [], debrisMesh = null, jet = null, tipCap = null, flyers = [], damage = null;
 function clearSim() {
-  izState = null;
+  izState = null; impactSeen = false;
   inspecting = false; if (debrisMesh) debrisMesh.visible = true;
   damage?.dispose(); damage = null;
   sim = null; playing = false; for (const o of [...dyn.children]) if (!rod || o !== rod.group) { dyn.remove(o); o.traverse?.(x => x.geometry?.dispose()); }
@@ -340,7 +351,7 @@ function frame(shot = false) { const b = new THREE.Box3().setFromObject(plateGro
   const narrow = innerWidth <= 900 || embed, advOpen = !narrow && $('adv').classList.contains('show'), left = narrow ? 0 : 400, right = innerWidth - (advOpen ? 410 : 0);
   const effW = (right - left) / innerWidth, effH = embed ? .85 : narrow ? .55 : 1;
   const d = Math.max(w / (camera.aspect * effW), h / effH) / vis * 1.12, cx = (x0 + x1) / 2 - ((left + right) / 2 / innerWidth - .5) * camera.aspect * vis * d;
-  const tgt = new THREE.Vector3(cx, cy - (embed ? .06 : narrow ? .22 : .02) * d * vis, 0), pos = new THREE.Vector3(cx + d * .18, cy + d * .2, d);
+  const tgt = new THREE.Vector3(cx, cy - (embed ? .06 : narrow ? .22 : .02) * d * vis, 0), pos = sim && sim.holes.length && !embed ? new THREE.Vector3(cx - d * .5, cy + d * .24, d * .86) /* swing to the entry side so the impact face (and crater) is visible */ : new THREE.Vector3(cx + d * .18, cy + d * .2, d);
   if (shot) camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: pos, q1: tgt }; else { camTween = null; controls.target.copy(tgt); camera.position.copy(pos); controls.update(); } }
 controls.addEventListener('start', () => { camTween = null; });
 // close-up on the damage: exit side of the last perforated plate (or crater of the last plate hit)
@@ -357,7 +368,8 @@ renderer.setAnimationLoop(() => {
   const izk = impactZoomTick(now); if (sim && playing) { simT += dt / +$('iPB').value * sim.tEnd * speed * izk; if (simT >= sim.tEnd) { simT = sim.tEnd; playing = false; $('pp').textContent = '▶'; } }
   if (camTween) { camTween.t = Math.min(1, camTween.t + dt / .6); const k = camTween.t * camTween.t * (3 - 2 * camTween.t); camera.position.lerpVectors(camTween.p0, camTween.p1, k); controls.target.lerpVectors(camTween.q0, camTween.q1, k); if (camTween.t >= 1) camTween = null; }
   if (sim) { updateSim(); drawChart(); if (!playing && simT >= sim.tEnd && !$('verdict').classList.contains('show')) verdict(); }
-  controls.update(); drawScale(); if (composer) composer.render(); else renderer.render(scene, camera);
+  controls.update(); drawScale(); const shk = Math.max(0, (shakeUntil - now) / 380); if (shk > 0) camera.position.add(shakeOff.set(Math.sin(now * .09), Math.sin(now * .13 + 1), 0).multiplyScalar(.012 * shk * shk * camera.position.distanceTo(controls.target)));
+  if (composer) composer.render(); else renderer.render(scene, camera); if (shk > 0) camera.position.sub(shakeOff);
 });
 
 // boot
@@ -366,9 +378,13 @@ try { if (location.hash.startsWith('#s=')) { const o = dec(location.hash.slice(3
 if (!booted) { buildRod(); loadScenario('strv103'); }
 setQuality(quality); toggleSection(false); pillset();
 if (!embed && 'serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW', e));
+
+$('shake').onclick = () => { shakeOn = !shakeOn; $('shake').classList.toggle('on', shakeOn); };
 // impact zoom: brief close-up + slow-mo at first impact (state declared at top)
 $('izoom').onclick = () => { impactZoom = !impactZoom; $('izoom').classList.toggle('on', impactZoom); };
-function impactZoomTick(nowMs) { if (!sim || !impactZoom || embed) return 1;
+function impactZoomTick(nowMs) { if (sim && playing && !impactSeen && sim.holes.length && simT >= sim.holes[0].t0) { impactSeen = true; if (shakeOn && !embed) shakeUntil = nowMs + 380; }
+  if (bokeh) bokeh.enabled = !!(izState && !izState.back && impactZoom); if (bokeh?.enabled) bokeh.uniforms.focus.value = camera.position.distanceTo(controls.target);
+  if (!sim || !impactZoom || embed) return 1;
   if (!izState && playing && sim.holes.length && simT >= sim.holes[0].t0) { const h = sim.holes[0], d = Math.max(.3, (S.D || 30) / 1000 * 18); izState = { until: nowMs + 1100 };
     camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: new THREE.Vector3(h.sIn - d * .55, d * .3, d * .85), q1: new THREE.Vector3(h.sIn + .05, 0, 0) }; }
   if (izState && !izState.back && nowMs > izState.until) { izState.back = true; frame(true); }
@@ -382,5 +398,5 @@ $('swRange').onclick = () => swSet('range'); $('swAngle').onclick = () => { swPl
 let cmpActive = false;
 const cmp = embed ? null : initCompare({ S, setup, playLen: () => +$('iPB').value, speed: () => speed, setActive: v => { cmpActive = v; renderer.domElement.style.visibility = v ? 'hidden' : ''; closePop(); } });
 $('fire').onclick = () => cmp?.on ? cmp.fire() : fire();
-window.__app = { sweep, swPlates, cmp, apply: o => { clearSim(); applySetup(o); }, fireStatic: () => { fire(); playing = false; simT = 0; }, seekT: t => { if (sim) { playing = false; simT = Math.min(t, sim.tEnd); } }, inspect, camera, controls, plateMeshes: () => plateMeshes, S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
+window.__app = { scene, sweep, swPlates, cmp, apply: o => { clearSim(); applySetup(o); }, fireStatic: () => { fire(); playing = false; simT = 0; }, seekT: t => { if (sim) { playing = false; simT = Math.min(t, sim.tEnd); } }, inspect, camera, controls, plateMeshes: () => plateMeshes, S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; if (simT >= sim.tEnd) { updateSim(); verdict(); } } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
 window.__ready = true;

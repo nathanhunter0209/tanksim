@@ -117,3 +117,10 @@ PBR plate materials (procedural mill-scale steel, ceramic tiles, rubber NERA, bo
 | T-90M + Relikt | ~965 mm | — | ~1000 mm |
 
 Default T-72B scenario now fires M829A3 at 1.5 km (perforates; the crossover is ~2.65 km).
+
+## Rendering (v14, Stage I)
+- Crater lining uses temper colours on steel (blue-grey → blue → purple → bronze → straw → plain steel) with a short white-hot rim glow (~0.6 ms of sim time). The end state is cooled.
+- After a shot the default camera swings to the entry side, so the impact face and crater are visible even when you skip to the end.
+- High quality only: GTAO ambient occlusion, depth of field focused on the impact during *Impact zoom*, bloom, spark streaks stretched along their velocity (cheap motion blur), smoke puffs at entry/exit, a flash pulse, and bolt heads on ERA and spacer ribs. ACES filmic tone mapping with a tuned environment map. *Shake* (Advanced → View) toggles a subtle camera shake on impact.
+- Low/mobile: no composer, AO, DoF, FX particles or bolts.
+- Jets: white-hot core at the tip fading to an orange tail (velocity colours in map mode).
