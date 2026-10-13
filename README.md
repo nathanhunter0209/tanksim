@@ -22,7 +22,16 @@ Earlier versions: tag `v1-showroom` (tank showroom) and tag `v2-sandbox-complex`
 - Per-plate results table and v/L-vs-time chart.
 - Save/Load (localStorage) and share links.
 
-On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v9`).
+On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v10`).
+
+## Sweep chart (sweep.js)
+**Advanced → Sweep chart** runs the real `simulate()` for the current round and target across either range (0–4 km) or one plate's angle (0–85°): 41 points, with each outcome change refined by bisection. The chart shows:
+- residual penetration behind the armor (the zero line is the perforation threshold);
+- the round's semi-infinite RHA capability;
+- shaded regions: stopped (green), perforated (red), ricochet (blue);
+- the crossover range or angle, labelled.
+
+Sweeps take ~20–100 ms.
 
 ## Compare mode (compare.js)
 Tap **Compare ⇆** under FIRE to run two configurations side by side: two rounds against the current target, or the current round against two targets.
@@ -90,4 +99,4 @@ Run `node validate.mjs`. It compares the model against public reference values a
 
 Some of these are calibration points rather than independent predictions: the nominal CE penetration and the RHA resistance.
 
-Files: `compare.js`, `damage.js`, `equiv.mjs` (RHA-equivalent helper), `index.html`, `app.js` (scene, UI, playback), `physics.js`, `projectile.js`, `data.js`, `validate.mjs`, `sw.js`, `manifest.json`.
+Files: `compare.js`, `sweep.js`, `damage.js`, `equiv.mjs` (RHA-equivalent helper), `index.html`, `app.js` (scene, UI, playback), `physics.js`, `projectile.js`, `data.js`, `validate.mjs`, `sw.js`, `manifest.json`.

@@ -8,6 +8,7 @@ import { simulate, impactVelocity, ribBoxes, semiInfRHA } from './physics.js';
 import { buildProjectile } from './projectile.js';
 import { holeHook, createDamage } from './damage.js';
 import { initCompare } from './compare.js';
+import { runSweep, drawSweep, sweepSummary } from './sweep.js';
 const embed = new URLSearchParams(location.search).has('embed'); if (embed) document.body.classList.add('embed');
 addEventListener('error', e => (window.__errs ||= []).push(String(e.message)));
 
@@ -345,8 +346,14 @@ try { if (location.hash.startsWith('#s=')) { const o = dec(location.hash.slice(3
 if (!booted) { buildRod(); loadScenario('strv103'); }
 setQuality(quality); toggleSection(false); pillset();
 if (!embed && 'serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW', e));
+let swKind = 'range', lastSweep = null;
+const swPlates = () => { $('swPlate').innerHTML = S.plates.map((p, i) => `<option value="${i}">Plate ${i + 1}: ${MATERIALS[p.mat].name}</option>`).join(''); const i = S.plates.findIndex(p => MATERIALS[p.mat].R >= 3e9); $('swPlate').value = Math.max(0, i); };
+function sweep(kind = swKind, plate = +$('swPlate').value || 0) { if (!S.plates.length) return null; const t0 = performance.now(); lastSweep = runSweep(setup(), kind, plate); drawSweep($('sweep'), lastSweep);
+  $('swInfo').textContent = sweepSummary(lastSweep) + ` (${(performance.now() - t0).toFixed(0)} ms)`; return lastSweep; }
+const swSet = k => { swKind = k; $('swRange').classList.toggle('on', k === 'range'); $('swAngle').classList.toggle('on', k === 'angle'); $('swPlate').style.display = k === 'angle' ? '' : 'none'; };
+$('swRange').onclick = () => swSet('range'); $('swAngle').onclick = () => { swPlates(); swSet('angle'); }; $('swRun').onclick = () => sweep(); swSet('range');
 let cmpActive = false;
 const cmp = embed ? null : initCompare({ S, setup, playLen: () => +$('iPB').value, speed: () => speed, setActive: v => { cmpActive = v; renderer.domElement.style.visibility = v ? 'hidden' : ''; closePop(); } });
 $('fire').onclick = () => cmp?.on ? cmp.fire() : fire();
-window.__app = { cmp, apply: o => { clearSim(); applySetup(o); }, fireStatic: () => { fire(); playing = false; simT = 0; }, seekT: t => { if (sim) { playing = false; simT = Math.min(t, sim.tEnd); } }, inspect, camera, controls, plateMeshes: () => plateMeshes, S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
+window.__app = { sweep, swPlates, cmp, apply: o => { clearSim(); applySetup(o); }, fireStatic: () => { fire(); playing = false; simT = 0; }, seekT: t => { if (sim) { playing = false; simT = Math.min(t, sim.tEnd); } }, inspect, camera, controls, plateMeshes: () => plateMeshes, S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
 window.__ready = true;

@@ -46,7 +46,7 @@ select.sm{border:1px solid var(--line);border-radius:10px;padding:8px;background
 #play{display:flex;gap:6px;align-items:center}#play input{flex:1}#tread{font:12px ui-monospace,monospace;min-width:84px;text-align:right}
 #rtab{font-size:12px;overflow:auto}#rtab table{width:100%;border-collapse:collapse}#rtab td,#rtab th{padding:4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}#rtab th{color:var(--mu);font-weight:500}
 .note{color:#9a6700}.out{font-weight:800}.PERFORATED{color:var(--red)}.STOPPED{color:var(--grn)}.RICOCHET{color:var(--blu)}
-#chart{width:100%;height:auto;border-radius:10px;background:#22262a}
+#chart{width:100%;height:auto;border-radius:10px;background:#22262a}#sweep{width:100%;height:auto;border-radius:10px;border:1px solid var(--line)}
 .desc{font-size:12px;color:var(--mu)}
 #overlay{position:fixed;left:400px;top:calc(28px + var(--sat));color:#1e2226;pointer-events:none;z-index:2}
 #ovTitle{font-size:32px;font-weight:700}#ov table{font-size:19px;font-weight:600;border-collapse:collapse}#ov td{padding:1px 24px 1px 0}
@@ -140,6 +140,9 @@ body.embed #legend{right:4px;top:8px;transform:scale(.6);transform-origin:top ri
  <h4>Per-plate results</h4>
  <div id="rtab">Press FIRE to run the shot.</div>
  <canvas id="chart" width="680" height="300"></canvas>
+ <h4>Sweep chart</h4>
+ <div class="seg"><button id="swRange" class="on">Range 0–4 km</button><button id="swAngle">Plate angle 0–85°</button><select class="sm" id="swPlate"></select><button id="swRun">Run sweep</button></div>
+ <canvas id="sweep" width="680" height="380"></canvas><div class="desc" id="swInfo">Sweeps the current round and target. Shaded: green stopped, red perforated, blue ricochet.</div>
  <h4>Setups</h4>
  <div class="seg"><button id="save">Save</button><select class="sm" id="load"><option value="">Load…</option></select><button id="share">Share link</button><button id="clr">Clear plates</button></div>
  <div class="desc">All projectile and armor data are rough public estimates. Model: Alekseevskii–Tate erosion with calibrated target resistance, ceramic dwell, ERA/NERA plate models, segmented shaped-charge jet (DiPersio–Simon–Merendino). An approximation, not a hydrocode. Run <code>node validate.mjs</code> for the reference comparison.</div>

@@ -4,6 +4,8 @@
 import { simulate, semiInfRHA } from './physics.js';
 import { SCENARIOS } from './data.js';
 import { keEquiv, ceEquiv } from './equiv.mjs';
+import { runSweep } from './sweep.js';
+import { PROJECTILES } from './data.js';
 const P = (mat, x, t, ax = 0, extra = {}) => ({ mat, x, y: 0, z: 0, t, ax, ay: 0, w: 1.2, h: 1.2, ...extra });
 const block = front => P('rha', front + 2, 4000); // 4 m semi-infinite block, front face at `front`
 const depthIn = (r, plateIdx) => { const h = r.holes.filter(h => r.segs[h.seg].plate === plateIdx).pop(); return h ? (h.sEnd - h.sIn) * 1000 : 0; };
@@ -50,6 +52,13 @@ for (const [k, [lo, hi]] of Object.entries(EST)) { const p = SCENARIOS[k].plates
   const o = (pj, r) => simulate({ proj: pj, range: r, plates: p }).outcome;
   check(`${k}: M829 @2km and PG-7V both stopped`, o('m829', 2000) !== 'PERFORATED' && o('pg7v', 0) !== 'PERFORATED', 0, 0, 'older threats defeated');
   check(`${k}: has description + 'estimate' label`, /estimate/i.test(SCENARIOS[k].target) && !!SCENARIOS[k].desc, 0, 0, 'labeling'); }
+// 5c. sweep charts (stage E)
+const ks = (k, plates, range = 0) => { const p = PROJECTILES[k]; return { proj: k, core: p.core, D: p.D, L: p.L, pen: p.pen, v0: p.v0, range, plates }; };
+{ const t0 = performance.now(); const d = runSweep(ks('m829', [P('rha', 0, 480)]), 'range'); const c = d.cross.find(c => c.from === 'PERFORATED' && c.to !== 'PERFORATED');
+  check('Range sweep M829 vs 480 mm RHA: perforation limit (km)', c ? c.x / 1000 : -1, .5, 4, 'crossover found; lower velocity at range', x => x.toFixed(2));
+  const d2 = runSweep(ks('3bm9', [P('rha', 0, 40)], 1000), 'angle', 0); const c2 = d2.cross.find(c => c.to === 'RICOCHET');
+  check('Angle sweep 3BM9 vs 40 mm plate: ricochet onset (°)', c2 ? c2.x : -1, 60, 80, 'Strv-103-type glacis ricochets at high obliquity', x => x.toFixed(1));
+  check('Two sweeps run time (ms)', performance.now() - t0, 0, 1500, 'interactive', x => x.toFixed(0)); }
 // 6. scenarios + performance
 let tmax = 0; for (const [k, sc] of Object.entries(SCENARIOS)) for (const pj of [sc.proj, 'm829a3', 'kornet', 'pg7v']) { const a = performance.now(); simulate({ proj: pj, range: sc.range, plates: sc.plates }); tmax = Math.max(tmax, performance.now() - a); }
 check('Max simulate() time per shot (ms)', tmax, 0, 50, 'interactive budget', x => x.toFixed(1));
