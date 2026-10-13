@@ -1,190 +1,196 @@
-// Fast engineering approximation of a long-rod / shaped-charge shot through a stack of plates.
-// KE: Tate-Alekseevskii erosion integrated in time, target resistance calibrated per shot so the
-// semi-infinite RHA result matches Lanz-Odermatt (L/D, density, hardness, obliquity term).
-// CE: jet capacity with standoff efficiency, ERA cutting, NERA disruption, tandem precursor.
-// Pure JS (no three.js) so it can be unit-tested in node. NOT a hydrocode. Results are approximate.
+// Time-stepped 1D-along-path penetration model (PUBLIC-ESTIMATE APPROXIMATION, not a hydrocode).
+// KE: Alekseevskii-Tate rod erosion with per-material target resistance R_t, rod strength Y_p,
+//     rear-face (exit) resistance reduction + plugging, LOS obliquity with asymmetric-erosion correction,
+//     critical-angle ricochet (velocity, L/D, t/D), yaw growth after asymmetric exits and in air gaps,
+//     ceramic dwell then comminuted penetration (backing-dependent), ERA/NERA moving-plate interaction.
+// CE: segmented jet (tip ~8 km/s -> tail ~2 km/s) from a virtual origin, stretching + breakup time,
+//     DiPersio-Simon-Merendino style cumulative penetration element by element with Bernoulli + strength,
+//     ERA / NERA disruption windows, tandem precursor. Pure JS; runs in a few ms.
 import { CORES, MATERIALS, PROJECTILES } from './data.js';
 const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI, clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-const RHO_RHA = 7850, RHO_CU = 8900;
+const RHO_CU = 8900, R_RHA = MATERIALS.rha.R, SEC = 2.0;
 
-export function plateAxes(p) { // R = Ry(ay) * Rz(ax); columns = local x (thickness), y (height), z (width)
-  const a = -rad(p.ax), b = rad(p.ay);
-  return { ex: [Math.cos(a) * Math.cos(b), Math.sin(a), -Math.cos(a) * Math.sin(b)], ey: [-Math.sin(a) * Math.cos(b), Math.cos(a), Math.sin(a) * Math.sin(b)], ez: [Math.sin(b), 0, Math.cos(b)] };
-}
-function rayBox(c, ax, half) { // ray from x=-inf along +x through y=z=0; returns [sIn, sOut, cosEntry] or null
-  let s0 = -1e9, s1 = 1e9, ce = 1;
-  for (let k = 0; k < 3; k++) {
-    const e = [ax.ex, ax.ey, ax.ez][k], h = half[k], oc = -(c[0] * 0 + c[1] * e[1] + c[2] * e[2]) - c[0] * e[0] + 0; // dot(o - c, e) with o=(0,0,0)
-    const dc = e[0];
+// ---------- geometry ----------
+export function plateAxes(p) { const a = -rad(p.ax), b = rad(p.ay);
+  return { ex: [Math.cos(a) * Math.cos(b), Math.sin(a), -Math.cos(a) * Math.sin(b)], ey: [-Math.sin(a) * Math.cos(b), Math.cos(a), Math.sin(a) * Math.sin(b)], ez: [Math.sin(b), 0, Math.cos(b)] }; }
+function rayBox(c, ax, half) {
+  let s0 = -1e9, s1 = 1e9;
+  for (let k = 0; k < 3; k++) { const e = [ax.ex, ax.ey, ax.ez][k], h = half[k], oc = -(c[0] * e[0] + c[1] * e[1] + c[2] * e[2]), dc = e[0];
     if (Math.abs(dc) < 1e-9) { if (Math.abs(oc) > h) return null; continue; }
-    let t1 = (-h - oc) / dc, t2 = (h - oc) / dc; if (t1 > t2) [t1, t2] = [t2, t1];
-    if (t1 > s0) { s0 = t1; ce = Math.abs(dc); } s1 = Math.min(s1, t2);
-  }
-  return s0 < s1 ? [s0, s1, ce] : null;
+    let t1 = (-h - oc) / dc, t2 = (h - oc) / dc; if (t1 > t2) [t1, t2] = [t2, t1]; s0 = Math.max(s0, t1); s1 = Math.min(s1, t2); }
+  return s0 < s1 ? [s0, s1] : null;
 }
-// Ribs: bars on the front face of the plate (local -x), running across the width
-export function ribBoxes(p) {
-  const n = p.ribs | 0, out = []; if (!n) return out; const rh = .04, rw = .04, t = p.t / 1000;
-  for (let k = 0; k < n; k++) out.push({ off: [-(t / 2 + rh / 2), -p.h / 2 + (k + .5) * p.h / n, 0], half: [rh / 2, rw / 2, p.w / 2] });
-  return out;
-}
+export function ribBoxes(p) { const n = p.ribs | 0, out = [], t = p.t / 1000; for (let k = 0; k < n; k++) out.push({ off: [-(t / 2 + .02), -p.h / 2 + (k + .5) * p.h / n, 0], half: [.02, .02, p.w / 2] }); return out; }
 export function segments(plates) {
   const segs = [];
-  plates.forEach((p, i) => {
-    const ax = plateAxes(p), c = [p.x, p.y, p.z], half = [p.t / 2000, p.h / 2, p.w / 2];
-    const hit = rayBox(c, ax, half); const obl = deg(Math.acos(clamp(Math.abs(ax.ex[0]), 0, 1)));
-    if (hit) segs.push({ plate: i, sIn: hit[0], sOut: hit[1], obl, mat: p.mat });
-    for (const r of ribBoxes(p)) {
-      const rc = [0, 1, 2].map(k => c[k] + ax.ex[k] * r.off[0] + ax.ey[k] * r.off[1] + ax.ez[k] * r.off[2]);
-      const h2 = rayBox(rc, ax, r.half); if (h2) segs.push({ plate: i, sIn: h2[0], sOut: h2[1], obl, mat: p.mat, rib: true });
-    }
-  });
-  segs.sort((a, b) => a.sIn - b.sIn);
-  const out = []; let last = -1e9;
+  plates.forEach((p, i) => { const ax = plateAxes(p), c = [p.x, p.y, p.z], obl = deg(Math.acos(clamp(Math.abs(ax.ex[0]), 0, 1)));
+    const h = rayBox(c, ax, [p.t / 2000, p.h / 2, p.w / 2]); if (h) segs.push({ plate: i, sIn: h[0], sOut: h[1], obl, mat: p.mat, tn: p.t / 1000 });
+    for (const r of ribBoxes(p)) { const rc = [0, 1, 2].map(k => c[k] + ax.ex[k] * r.off[0] + ax.ey[k] * r.off[1]); const h2 = rayBox(rc, ax, r.half); if (h2) segs.push({ plate: i, sIn: h2[0], sOut: h2[1], obl, mat: p.mat, tn: .04, rib: true }); } });
+  segs.sort((a, b) => a.sIn - b.sIn); const out = []; let last = -1e9;
   for (const s of segs) { if (s.sIn < last) s.sIn = last; if (s.sOut - s.sIn > 1e-5) { out.push(s); last = s.sOut; } }
-  for (const s of out) s.los = s.sOut - s.sIn;
+  out.forEach((s, k) => { s.los = s.sOut - s.sIn; const nx = out[k + 1]; s.backed = !!nx && nx.sIn - s.sOut < .01 && !MATERIALS[nx.mat].air && MATERIALS[nx.mat].R >= 3.5e9; });
   return out;
-}
-
-// Lanz-Odermatt semi-infinite penetration (m) into steel of hardness bhn, normal incidence
-export function lanzOdermatt(L, D, v, coreKey, bhn = 270) {
-  const c = CORES[coreKey], lo = c.lo, vk = v / 1000;
-  const s2 = lo.k ? 2.2 * (bhn / 270) : (lo.c0 + lo.c1 * bhn) * bhn / c.rho;
-  const f = lo.a / Math.tanh(.283 + .0656 * L / D) * Math.sqrt(c.rho / RHO_RHA) * Math.exp(-s2 / (vk * vk)) * (c.bonus || 1);
-  return Math.max(0, f * L);
-}
-function tateU(v, rp, Y, rt, R) {
-  const A = .5 * (rp - rt), B = -rp * v, C = .5 * rp * v * v + Y - R;
-  if (C <= 0) return 0;
-  if (Math.abs(A) < 1e-6) return clamp(-C / B, 0, v);
-  const d = Math.sqrt(Math.max(0, B * B - 4 * A * C)); const r1 = (-B - d) / (2 * A), r2 = (-B + d) / (2 * A);
-  if (r1 >= 0 && r1 <= v) return r1; if (r2 >= 0 && r2 <= v) return r2; return clamp(r1, 0, v);
-}
-function tateSemiInf(L, D, v, rp, Y, R, dt = 5e-7) {
-  let P = 0; for (let i = 0; i < 40000 && L > .3 * D && v > 1; i++) { const u = tateU(v, rp, Y, RHO_RHA, R); P += u * dt; L -= (v - u) * dt; v -= Y / (rp * Math.max(L, D)) * dt; if (u <= 0 && v < 50) break; }
-  return P;
-}
-function calibrateR(L, D, v, core) {
-  const c = CORES[core], target = lanzOdermatt(L, D, v, core); let lo = .5e9, hi = 25e9;
-  for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (tateSemiInf(L, D, v, c.rho, c.Y, m, 1e-6) > target) lo = m; else hi = m; }
-  return { R: (lo + hi) / 2, P: target };
 }
 export const impactVelocity = (pr, v0, range) => pr.type === 'KE' ? v0 * Math.exp(-pr.kloss * range / 1000) : v0;
 function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
 
-// shot = { proj (key), core, cal, D, L, v0, range, plates }
+// Tate: 0.5 rp (v-u)^2 + Y = 0.5 rt u^2 + R
+export function tateU(v, rp, Y, rt, R) {
+  if (Y >= R + .5 * rt * v * v) return v; // rigid-body penetration
+  const A = .5 * (rp - rt), B = -rp * v, C = .5 * rp * v * v + Y - R; if (C <= 0) return 0;
+  if (Math.abs(A) < 1e-6) return clamp(-C / B, 0, v);
+  const d = Math.sqrt(Math.max(0, B * B - 4 * A * C)), r1 = (-B - d) / (2 * A), r2 = (-B + d) / (2 * A);
+  return r1 >= 0 && r1 <= v ? r1 : clamp(r2, 0, v);
+}
+// critical ricochet angle (deg): Tate-type rod ricochet criterion with t/D (plate support) and calibration factor
+export function critAngle(rp, v, L, D, Yt, tn) {
+  const k = .6 * (2 * rp * v * v / (3 * Yt)) * ((L * L + D * D) / (L * D)) * clamp(.55 + .2 * tn / D, .6, 1.15);
+  return deg(Math.atan(Math.cbrt(k)));
+}
+
 export function simulate(shot) {
-  const pr = { ...PROJECTILES[shot.proj], ...(shot.over || {}) };
-  const segs = segments(shot.plates), rand = rng(1234);
+  const pr = { ...PROJECTILES[shot.proj], ...(shot.over || {}) }, segs = segments(shot.plates), rand = rng(1234);
   const v = impactVelocity(pr, shot.v0 ?? pr.v0, shot.range ?? 0);
   const res = pr.type === 'KE' ? simKE(pr, shot, segs, v, rand) : simCE(pr, shot, segs, v, rand);
   res.segs = segs; res.vImpact = v; res.proj = pr;
-  // per-plate summary
-  res.plates = shot.plates.map((p, i) => { const ss = segs.filter(s => s.plate === i); const ev = res.segEvents.filter(e => segs[e.seg].plate === i);
-    const last = ev[ev.length - 1];
-    return { i, mat: p.mat, hit: ss.length > 0, los: ss.reduce((a, s) => a + s.los, 0) * 1000, obl: ss[0]?.obl ?? 0,
-      perforated: ev.length ? ev.every(e => e.perforated) : false, reached: ev.length > 0, Lres: last ? last.Lout * 1000 : null, vres: last ? last.vout : null, notes: [...new Set(ev.flatMap(e => e.notes))] }; });
+  res.plates = shot.plates.map((p, i) => { const ss = segs.filter(s => s.plate === i), ev = res.segEvents.filter(e => segs[e.seg].plate === i), last = ev[ev.length - 1];
+    return { i, mat: p.mat, hit: ss.length > 0, los: ss.reduce((a, s) => a + s.los, 0) * 1000, obl: ss[0]?.obl ?? 0, perforated: ev.length ? ev.every(e => e.perforated) : false, reached: ev.length > 0,
+      Lres: last ? last.Lout * 1000 : null, vres: last ? last.vout : null, notes: [...new Set(ev.flatMap(e => e.notes))] }; });
   return res;
 }
+function debrisCone(v, mres, liner) { // behind-armor debris: half-angle narrows with residual velocity; count ~ residual energy
+  const half = clamp(rad(18 + 22 * (1 - clamp(v / 1800, 0, 1))), rad(10), rad(42)) * (liner ? .45 : 1);
+  const n = Math.round(clamp(12 + .5 * mres * v * v / 2e5, 10, 160) * (liner ? .5 : 1)); return { half, n };
+}
 
+// ---------------- KE ----------------
 function simKE(pr, shot, segs, v0, rand) {
-  const core = CORES[shot.core || pr.core], D = (shot.D ?? pr.D) / 1000, Ltot = (shot.L ?? pr.L) / 1000;
-  const rp = core.rho, Y = core.Y; let L = Ltot * .92; // working length (nose cap excluded)
-  const cal = calibrateR(L, D, v0, shot.core || pr.core); const R = cal.R;
-  const first = segs.length ? segs[0].sIn : 0, start = first - .45 - Ltot;
-  const dt = 2.5e-7; let t = 0, tip = start + Ltot, v = v0, yaw = 0, si = 0, inSeg = false, dwell = 0, consumed = 0;
-  const samples = [], segEvents = [], debris = [], holes = [], era = [], bulges = []; let outcome = 'MISS', ric = null, stopped = false, perfAll = true;
-  let cur = null; const rec = u => samples.push({ t, tip, tail: tip - L - (Ltot * .08), L, v, u, seg: inSeg ? si : -1 });
-  const spawn = (n, p, dir, cone, speed, t0, kind) => { for (let k = 0; k < n; k++) { const a = rand() * Math.PI * 2, th = cone * Math.sqrt(rand()); const sp = speed * (.35 + .65 * rand());
-    const d = [dir * Math.cos(th), Math.sin(th) * Math.cos(a), Math.sin(th) * Math.sin(a)]; debris.push({ t0, p: [p, 0, 0], v: d.map(x => x * sp), s: .004 + rand() * .01, kind }); } };
-  for (let step = 0; step < 400000; step++) {
-    // enter segment?
-    if (!inSeg && si < segs.length && tip >= segs[si].sIn) {
-      const s = segs[si], m = MATERIALS[s.mat]; inSeg = true; consumed = 0;
-      cur = { seg: si, tIn: t, Lin: L, vin: v, notes: [], perforated: false, teBase: m.te };
-      if (m.te > .25 && !m.crew) { // ricochet / yaw check
-        const Yt = 1.2e9 * Math.max(m.te, .3); const k = .6 * (2 * rp * v * v / (3 * Yt)) * ((L * L + D * D) / (L * D));
-        const thc = deg(Math.atan(Math.cbrt(k))) - (shot.plates[s.plate].ribs ? 4 : 0);
-        cur.thc = thc;
-        if (s.obl > thc) { outcome = 'RICOCHET'; ric = { t, s: tip, obl: s.obl, plate: s.plate }; cur.notes.push(`ricochet (θ ${s.obl.toFixed(0)}° > θc ${thc.toFixed(0)}°)`);
-          spawn(30, tip, -1, 1.0, v * .25, t, 'ricochet'); holes.push({ seg: si, sIn: s.sIn, sEnd: s.sIn + Math.min(s.los, 3 * D), r: D * 1.2, t0: t, t1: t + 1e-5, gouge: true });
-          cur.Lout = L * .85; cur.vout = v * .8; segEvents.push(cur); break; }
-        if (s.obl > thc - 8) { const y = (s.obl - (thc - 8)) / 8; yaw += .5 * y; cur.notes.push(`yaw induced (${(y * 100).toFixed(0)}%)`); }
-      }
-      if (m.era) { const f = m.era.ke * clamp(Math.sin(rad(s.obl)) / Math.sin(rad(60)), .3, 1.25); L *= 1 - f; yaw += m.era.yaw; cur.notes.push(`ERA triggered: rod −${(f * 100).toFixed(0)}% length`); era.push({ plate: s.plate, t0: t }); }
-      if (m.dwell) { dwell = m.dwell * 12e-6 * (s.los / .05) * clamp((1850 - v) / 800, 0, 1); if (dwell > 0) cur.notes.push(`ceramic dwell ${(dwell * 1e6).toFixed(1)} µs`); }
-      if (m.nera) bulges.push({ plate: s.plate, t0: t });
-      if (m.crew) cur.notes.push('CREW COMPARTMENT REACHED');
-      cur.te = m.te * Math.pow(Math.cos(rad(s.obl)), .224) * (1 + yaw);
+  const coreK = shot.core || pr.core, core = CORES[coreK], D = (shot.D ?? pr.D) / 1000, Ltot = (shot.L ?? pr.L) / 1000, rp = core.rho, Yp = core.Y;
+  let sacUsed = false, L = Ltot * .93, v = v0, yaw = 0, omega = 0; // yaw angle (deg) and yaw rate (deg/s)
+  const first = segs.length ? segs[0].sIn : 0, start = first - .45 - Ltot; let tip = start + Ltot, t = 0;
+  const samples = [], segEvents = [], debris = [], holes = [], era = [], bulges = []; let outcome = 'PERFORATED', ric = null;
+  const rec = (u, si) => samples.push({ t, tip, tail: tip - L - Ltot * .07, L, v, u, seg: si });
+  const spawn = (n, s, dir, half, speed, t0, kind) => { for (let k = 0; k < n; k++) { const a = rand() * Math.PI * 2, th = half * Math.sqrt(rand()), sp = speed * (.35 + .65 * rand()); debris.push({ t0, p: [s, 0, 0], v: [dir * Math.cos(th) * sp, Math.sin(th) * Math.cos(a) * sp, Math.sin(th) * Math.sin(a) * sp], s: .003 + rand() * .01, kind }); } };
+  const fly = (to) => { const n = Math.max(2, Math.ceil((to - tip) / .02)), dt = (to - tip) / v / n; for (let k = 0; k < n; k++) { tip += v * dt; t += dt; yaw += omega * dt; rec(v, -1); } };
+  rec(v, -1);
+  for (let si = 0; si < segs.length; si++) {
+    const s = segs[si], m = MATERIALS[s.mat]; fly(s.sIn);
+    const ev = { seg: si, tIn: t, Lin: L, vin: v, notes: [], perforated: false }; segEvents.push(ev);
+    if (m.air) { if (m.crew) ev.notes.push('CREW COMPARTMENT REACHED'); fly(s.sOut); ev.perforated = true; ev.Lout = L; ev.vout = v; ev.tOut = t; continue; }
+    const yawF = () => 1 + Math.min(1.4, .22 * L * Math.sin(rad(yaw)) / D); // yawed rod presents a wider, less efficient footprint
+    // ricochet check (hard plates only)
+    if (m.R >= 3e9) { const thc = critAngle(rp, v, L, D, 1.2e9 * m.R / R_RHA, s.tn) - (s.rib || shot.plates[s.plate].ribs ? 4 : 0) - yaw * .5; ev.thc = thc;
+      if (s.obl > thc) { outcome = 'RICOCHET'; ric = { t, s: tip, obl: s.obl, plate: s.plate }; ev.notes.push(`ricochet (θ ${s.obl.toFixed(0)}° > θc ${thc.toFixed(0)}°)`);
+        spawn(30, tip, -1, 1, v * .25, t, 'ricochet'); holes.push({ seg: si, sIn: s.sIn, sEnd: s.sIn + Math.min(s.los, 2.5 * D), r: D * 1.1, t0: t, t1: t + 1e-5, gouge: true }); ev.Lout = L * .8; ev.vout = v * .8; ev.tOut = t; break; }
+      if (s.obl > thc - 6) { yaw += 3 * (s.obl - thc + 6) / 6; ev.notes.push('near-critical angle: rod bending/yaw'); } }
+    // ERA / NERA moving plates: flyer momentum vs rod → tip loss + yaw (fracture)
+
+    const plateHit = (h, rho, vf, n, label) => { const sinT = Math.max(Math.sin(rad(s.obl)), .2), eta = n * rho * h * vf * sinT / (rp * D * v);
+      const Tw = label === 'ERA' ? 70e-6 : 0, sac = label === 'ERA' && pr.sacTip && !sacUsed ? (sacUsed = true, .35) : 1; const dL = Math.min(L * .6, (label === 'ERA' ? 1.6 : .8) * eta * v * (Tw || 40e-6) * sac); L -= dL;
+      const dy = clamp(eta * 60 * sac, 0, 18); yaw += dy; omega += dy * 2500; ev.notes.push(`${label}: −${(dL * 1000).toFixed(0)} mm rod, +${dy.toFixed(1)}° yaw`); return dL; };
+    if (m.era) { era.push({ plate: s.plate, t0: t }); plateHit(m.era.h, m.era.rho, m.era.vf, m.era.n, 'ERA'); }
+    if (m.nera) { bulges.push({ plate: s.plate, t0: t }); }
+    // dwell (ceramic interface defeat)
+    let dwell = 0; if (m.dwell) { const d = m.dwell; dwell = d.tau * clamp(1 - (v - d.v1) / (d.v2 - d.v1), 0, 1) * (s.backed ? 1 : .35) * clamp(s.los / .04, .5, 2); if (dwell > 0) ev.notes.push(`interface dwell ${(dwell * 1e6).toFixed(1)} µs`); }
+    const eObl = 1 + .18 * Math.sin(rad(s.obl)) ** 2; // asymmetric erosion at obliquity
+    const dt = clamp(s.los / v / 300, 2e-8, 2.5e-7); let breakout = false, steps = 0, tIn = t;
+    while (steps++ < 200000) {
+      const rem = s.sOut - tip, Deff = D * yawF();
+      let R = m.R * yawF() * (m.dwell && !s.backed ? .65 : 1);
+      R *= .3 + .7 * clamp(rem / (2.2 * Deff), 0, 1); // rear-face: plastic zone reaches free surface → lower resistance
+      if (m.nera && t - tIn < m.nera.T) R *= 1 + .5 * Math.sin(Math.PI * (t - tIn) / m.nera.T); // bulging plates feeding into the path
+      let u;
+      if (dwell > 0) { u = 0; dwell -= dt; } else u = tateU(v, rp, Yp, m.rho, R);
+      if (u < v) { L -= (v - u) * eObl * dt; v -= Yp / (rp * Math.max(L, D)) * dt; } else v -= (R + .5 * m.rho * v * v) / (rp * Math.max(L, D)) * dt * .2;
+      tip += u * dt; t += dt; if (steps % 12 === 0) rec(u, si);
+      if (rem < .35 * Deff * Math.cos(rad(s.obl)) + 1e-4 && u > 30) { breakout = true; break; } // plug / petal failure at the rear face
+      if (tip >= s.sOut) { breakout = true; break; }
+      if (L < .5 * D || v < 40) break;
     }
-    let u = v;
-    if (inSeg) {
-      const s = segs[si], m = MATERIALS[s.mat];
-      if (cur.te < .01) u = v; // air-like volume
-      else if (dwell > 0) { u = 0; dwell -= dt; }
-      else u = tateU(v, rp, Y, RHO_RHA, R);
-      if (u < v && cur.te >= .01) { L -= (v - u) * dt; v -= Y / (rp * Math.max(L, D)) * dt; }
-      const adv = cur.te < .01 ? u * dt : u * dt / cur.te; tip += adv; consumed += adv;
-      // break-out near the back face (plug/bulge failure) or stop
-      const remain = (s.sOut - tip) * cur.te;
-      if (tip >= s.sOut || (remain < D * (m.te >= .8 && !m.nera ? .5 : .2) * clamp(v / 1500, .4, 1.2) && u > 50)) {
-        const plugT = t; tip = Math.max(tip, s.sOut); inSeg = false; cur.perforated = true; cur.Lout = L; cur.vout = v; cur.tOut = t;
-        if (m.nera) { L *= 1 - m.nera.ke; yaw += .05; cur.notes.push('NERA bulge: rod disrupted'); }
-        const th = s.los * cur.te; if (cur.te >= .05) { const cone = shot.plates.slice(s.plate).some(p => MATERIALS[p.mat].liner) && m.liner ? .15 : .45;
-          spawn(Math.round(clamp(25 + th * 900 * (v / 1500), 10, 120)), s.sOut, 1, m.liner ? .15 : cone, v * .7, plugT, 'spall'); spawn(8, s.sIn, -1, .9, v * .12, cur.tIn + 2e-6, 'ejecta'); }
-        if (cur.te >= .01) holes.push({ seg: si, sIn: s.sIn, sEnd: s.sOut, r: D * (1 + .4 * yaw) * (m.te > .3 ? 1 : .8), t0: cur.tIn, t1: t, perforated: true });
-        segEvents.push(cur); si++;
-        if (si >= segs.length) { outcome = 'PERFORATED'; }
-      }
-      if (inSeg && (L <= .35 * D || v < 60)) {
-        cur.Lout = 0; cur.vout = 0; cur.tOut = t; segEvents.push(cur); holes.push({ seg: si, sIn: s.sIn, sEnd: tip, r: D * 1.1, t0: cur.tIn, t1: t, perforated: false });
-        spawn(10, s.sIn, -1, .9, 150, cur.tIn + 2e-6, 'ejecta'); outcome = 'STOPPED'; stopped = true; L = 0; rec(0); break;
-      }
-    } else tip += v * dt;
-    t += dt; if (step % 8 === 0) rec(u);
-    if (outcome === 'PERFORATED' && tip > (segs.length ? segs[segs.length - 1].sOut : 0) + .6) break;
-    if (!segs.length && tip > 1.5) break;
+    if (breakout) {
+      if (m.nera) { const h = m.nera.h; plateHit(h, 7850, m.nera.vb, 2, 'NERA bulge'); }
+      tip = s.sOut; ev.perforated = true; ev.Lout = L; ev.vout = v; ev.tOut = t; rec(v, si);
+      const asym = Math.sin(rad(s.obl)) * clamp(D / Math.max(s.tn, 1e-3), .15, 1.5); if (asym > .05) { yaw += 1.2 * asym; omega += 900 * asym; ev.notes.push(`asymmetric exit: yaw ${yaw.toFixed(1)}°`); }
+      const mres = rp * Math.PI * D * D / 4 * L, liner = shot.plates.slice(s.plate).some(p => MATERIALS[p.mat].liner); const dc = debrisCone(v, mres, MATERIALS[s.mat].liner || liner);
+      spawn(dc.n, s.sOut, 1, dc.half, v * .75, t, 'spall'); spawn(8, s.sIn, -1, 1, v * .1, tIn + 2e-6, 'ejecta');
+      holes.push({ seg: si, sIn: s.sIn, sEnd: s.sOut, r: D * (.9 + .25 * Math.min(yaw, 10) / 10 * 4), t0: tIn, t1: t, perforated: true });
+    } else {
+      const sec = SEC * D * R_RHA / m.R * .85; if (s.sOut - tip <= sec) { tip = s.sOut; ev.perforated = true; ev.Lout = 0; ev.vout = 0; ev.tOut = t; ev.notes.push('perforated by residual crater growth'); holes.push({ seg: si, sIn: s.sIn, sEnd: s.sOut, r: D, t0: tIn, t1: t, perforated: true }); outcome = 'STOPPED'; ev.depth = s.los * 1000; L = 0; rec(0, si); break; }
+      tip += sec; ev.Lout = 0; ev.vout = 0; ev.tOut = t; outcome = 'STOPPED'; holes.push({ seg: si, sIn: s.sIn, sEnd: tip, r: D * 1.05, t0: tIn, t1: t, perforated: false });
+      spawn(10, s.sIn, -1, 1, 160, tIn + 2e-6, 'ejecta'); ev.depth = (tip - s.sIn) * 1000; L = 0; rec(0, si); break;
+    }
   }
-  if (outcome === 'MISS' && segs.length && !ric && !stopped) outcome = 'PERFORATED';
-  const tEnd = t + (outcome === 'RICOCHET' ? 1.2e-3 : 3e-4);
-  const crewHit = segEvents.some(e => MATERIALS[segs[e.seg].mat].crew) && outcome !== 'STOPPED' || (outcome === 'PERFORATED' && segs.some(s => MATERIALS[s.mat].crew));
-  const behind = outcome === 'PERFORATED' && L > .3 * D ? tateSemiInf(L, D, v, rp, Y, R) * 1000 : 0;
-  return { type: 'KE', samples, segEvents, debris, holes, era, bulges, outcome, ric, tEnd, Lres: outcome === 'PERFORATED' ? L * 1000 : 0, vres: outcome === 'PERFORATED' ? v : 0, behind, crewHit, R: cal.R, Plo: cal.P * 1000, D, Ltot, start };
+  if (outcome === 'PERFORATED') fly(tip + .6);
+  // behind-armor residual: semi-infinite RHA with current rod state
+  const behind = outcome === 'PERFORATED' ? semiInfRHA(L, D, v, rp, Yp, yaw) * 1000 : 0;
+  const crewHit = outcome === 'PERFORATED' && segs.some(s => MATERIALS[s.mat].crew);
+  return { type: 'KE', samples, segEvents, debris, holes, era, bulges, outcome, ric, tEnd: t + (outcome === 'RICOCHET' ? 1.2e-3 : 3e-4), Lres: outcome === 'PERFORATED' ? L * 1000 : 0, vres: outcome === 'PERFORATED' ? v : 0, behind, crewHit, yaw, D, Ltot, start };
+}
+export function semiInfRHA(L, D, v, rp, Yp, yaw = 0, R = R_RHA, rt = 7850) {
+  let P = 0; const dt = 2e-7; const yf = 1 + Math.min(1.4, .22 * L * Math.sin(rad(yaw)) / D);
+  for (let i = 0; i < 100000 && L > .5 * D && v > 40; i++) { const u = tateU(v, rp, Yp, rt, R * yf); P += u * dt; if (u < v) { L -= (v - u) * dt; v -= Yp / (rp * Math.max(L, D)) * dt; } else break; }
+  return P + SEC * D; // + early-time / secondary crater penetration (gives the observed L/D dependence)
 }
 
-function simCE(pr, shot, segs, v0, rand) {
-  const cal = pr.cal / 1000, first = segs.length ? segs[0].sIn : 0, sDet = first - 1.6 * cal; // liner position at detonation
-  const e = sd => sd <= 6 ? .8 + .2 * sd / 6 : Math.max(.3, 1 - .045 * (sd - 6)); const e0 = e(1.6);
-  let C = pr.pen / 1000, used = 0, precursor = pr.tandem; const vT = pr.kind === 'rpg' ? 7000 : 8500, vB = 2000;
-  const bodyStart = first - .35; const tDet = (first - bodyStart) / v0;
-  const dt = 5e-8; let t = tDet, tip = sDet, si = 0, inSeg = false, cur = null; const samples = [], segEvents = [], debris = [], holes = [], era = [], bulges = []; let outcome = 'PERFORATED';
-  for (let k = 0; k <= 40; k++) samples.push({ t: tDet * k / 40, tip: bodyStart + (first - bodyStart) * k / 40, body: bodyStart + (first - bodyStart) * k / 40, L: C * 1000, v: v0, u: v0, seg: -1, pre: true });
-  const spawn = (n, p, dir, cone, speed, t0, kind) => { for (let k = 0; k < n; k++) { const a = rand() * Math.PI * 2, th = cone * Math.sqrt(rand()), sp = speed * (.3 + .7 * rand()); const d = [dir * Math.cos(th), Math.sin(th) * Math.cos(a), Math.sin(th) * Math.sin(a)]; debris.push({ t0, p: [p, 0, 0], v: d.map(x => x * sp), s: .003 + rand() * .008, kind }); } };
-  for (let step = 0; step < 400000; step++) {
-    const frac = clamp(used / C, 0, 1), vj = vT - (vT - vB) * frac;
-    if (!inSeg && si < segs.length && tip >= segs[si].sIn) {
-      const s = segs[si], m = MATERIALS[s.mat]; inSeg = true; cur = { seg: si, tIn: t, Lin: (C - used) * 1000, vin: vj, notes: [], perforated: false };
-      if (m.era) { if (precursor) { precursor = false; cur.notes.push('ERA initiated by tandem precursor — main jet unaffected'); era.push({ plate: s.plate, t0: t - 6e-5 }); }
-        else { const f = m.era.ce * clamp(Math.sin(rad(Math.max(s.obl, 20))) / Math.sin(rad(60)), .4, 1.15); const rem = C - used; C = used + rem * (1 - f); cur.notes.push(`ERA cut jet: −${(f * 100).toFixed(0)}% of remaining jet`); era.push({ plate: s.plate, t0: t }); } }
-      if (m.nera) { const rem = C - used; C = used + rem * (1 - m.nera.ce); cur.notes.push(`NERA bulge disrupted jet −${(m.nera.ce * 100).toFixed(0)}%`); bulges.push({ plate: s.plate, t0: t }); }
-      if (m.crew) cur.notes.push('CREW COMPARTMENT REACHED');
-      cur.sd = (s.sIn - sDet) / cal; cur.eff = e(cur.sd) / e0; if (cur.sd > 8 && cur.eff < .98) cur.notes.push(`standoff ${cur.sd.toFixed(1)} CD: jet particulated (eff ${(cur.eff * 100).toFixed(0)}%)`);
+// ---------------- CE (shaped charge jet, element-wise DPSM) ----------------
+const JET = { rpg: { vt: 7400, vtail: 2000, tb: 1.15 }, atgm: { vt: 8500, vtail: 2000, tb: 1.25 }, heat: { vt: 8200, vtail: 2000, tb: 1.2 } };
+function jetElements(pr, k = 1) { const J = JET[pr.kind] || JET.heat, N = 160, els = [];
+  for (let i = 0; i < N; i++) { const v1 = J.vt - (J.vt - J.vtail) * i / N, v2 = J.vt - (J.vt - J.vtail) * (i + 1) / N; els.push({ v: (v1 + v2) / 2, dv: v1 - v2, k, alive: 1 }); }
+  return { els, tb: J.tb * pr.cal * 1e-6 }; } // breakup time ~ 1.2 µs per mm cone diameter
+// march jet elements into a material stack along the path; returns penetration depth, per-element arrivals
+function dpsm(pr, layers, xLiner, scale, disrupt) {
+  const { els, tb } = jetElements(pr, scale); let P = layers.length ? layers[0].sIn : xLiner + .3, li = 0; const arrivals = [];
+  const rj = RHO_CU;
+  for (let i = 0; i < els.length; i++) {
+    const e = els[i]; if (li >= layers.length) { arrivals.push({ i, t: (P - xLiner) / e.v, P, free: true }); continue; }
+    let ta = (P - xLiner) / e.v; let len = e.dv * Math.min(ta, tb) * e.k; // element stretches until breakup time, then particulates
+    const particulated = ta > tb; let eff = particulated ? Math.max(.12, 1 - .7 * Math.min(1, (ta - tb) / (1.5 * tb))) : 1; // drift/tumble after breakup
+    eff *= disrupt ? disrupt(e, ta, P) : 1;
+    let budget = len * eff;
+    while (budget > 1e-6 && li < layers.length) {
+      const L = layers[li]; if (P < L.sIn) { P = L.sIn; ta = (P - xLiner) / e.v; }
+      const m = MATERIALS[L.mat]; if (m.air) { P = L.sOut; li++; continue; }
+      const u = tateU(e.v, rj, 0, m.rho, m.R * .55); if (u <= 1) { budget = 0; break; } // jets see a lower effective strength (high strain rate)
+      const depthPerLen = u / (e.v - u), can = budget * depthPerLen, room = L.sOut - P;
+      if (can >= room) { P = L.sOut; budget -= room / depthPerLen; li++; L.out = L.out ?? ta; } else { P += can; budget = 0; }
     }
-    let u = vj;
-    if (inSeg) {
-      const s = segs[si], m = MATERIALS[s.mat];
-      if (m.tc < .01) u = vj; else { const rt = Math.max(m.rho, 1000); u = vj / (1 + Math.sqrt(rt / RHO_CU)); used += u * dt * m.tc * Math.max(1, RHO_RHA / Math.max(m.rho, 1000)) ** 0 / cur.eff; }
-      tip += u * dt;
-      if (tip >= s.sOut) { inSeg = false; cur.perforated = true; cur.Lout = (C - used) * 1000; cur.vout = vj; cur.tOut = t;
-        if (m.tc >= .05) { spawn(Math.round(clamp(20 + (C - used) * 120, 8, 90)), s.sOut, 1, m.liner ? .12 : .35, 1500 + 2500 * (1 - frac), t, 'spall'); holes.push({ seg: si, sIn: s.sIn, sEnd: s.sOut, r: cal * .12, t0: cur.tIn, t1: t, perforated: true }); }
-        segEvents.push(cur); si++; }
-      if (inSeg && used >= C) { cur.Lout = 0; cur.vout = 0; cur.tOut = t; cur.perforated = false; segEvents.push(cur); holes.push({ seg: si, sIn: s.sIn, sEnd: tip, r: cal * .14, t0: cur.tIn, t1: t, perforated: false }); spawn(12, s.sIn, -1, .8, 400, cur.tIn + 1e-6, 'ejecta'); outcome = 'STOPPED'; break; }
-    } else tip += vj * dt;
-    t += dt; if (step % 20 === 0) samples.push({ t, tip, body: first, L: Math.max(0, C - used) * 1000, v: vj, u, seg: inSeg ? si : -1, jet: true });
-    if (si >= segs.length && tip > (segs.length ? segs[segs.length - 1].sOut : 0) + .6) break;
+    arrivals.push({ i, t: ta, P, v: e.v });
   }
-  if (outcome === 'PERFORATED' && C - used < .002) outcome = 'STOPPED';
-  const residual = outcome === 'PERFORATED' ? Math.max(0, C - used) * 1000 : 0;
-  const crewHit = outcome === 'PERFORATED' && segs.some(s => MATERIALS[s.mat].crew) || segEvents.some(e => MATERIALS[segs[e.seg].mat].crew && e.Lin > 0);
-  return { type: 'CE', samples, segEvents, debris, holes, era, bulges, outcome, ric: null, tEnd: t + 2e-4, Lres: residual, vres: outcome === 'PERFORATED' ? vB : 0, behind: residual, crewHit, tDet, sDet, bodyStart, start: bodyStart };
+  return { P, arrivals, done: li >= layers.length, tb };
 }
+function simCE(pr, shot, segs, v0, rand) {
+  const cal = pr.cal / 1000, first = segs.length ? segs[0].sIn : 0, standoff0 = 1.8 * cal, xLiner = first - standoff0;
+  // calibrate jet element length scale so semi-infinite RHA at built-in standoff == nominal (public) penetration
+  const ref = l => dpsm(pr, [{ sIn: 0, sOut: 5, mat: 'rha' }], -standoff0, l).P; let lo = .1, hi = 20;
+  for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (ref(mid) < pr.pen / 1000) lo = mid; else hi = mid; } const scale = (lo + hi) / 2;
+  // tandem precursor clears ERA ahead of the main charge
+  const segEvents = segs.map((s, si) => ({ seg: si, notes: [], perforated: false, Lin: 0 })), era = [], bulges = [], debris = [], holes = [];
+  let precursor = pr.tandem; const eraWin = [];
+  segs.forEach((s, si) => { const m = MATERIALS[s.mat]; if (m.era) { if (precursor) { precursor = false; segEvents[si].notes.push('ERA initiated early by tandem precursor — main jet unaffected'); era.push({ plate: s.plate, t0: -2e-4 }); }
+      else eraWin.push({ si, s, m, eta: m.era.n * m.era.rho * m.era.h * m.era.vf * Math.max(Math.sin(rad(s.obl)), .25) }); }
+    if (m.nera) eraWin.push({ si, s, m, nera: true, eta: 2 * 7850 * m.nera.h * m.nera.vb * Math.max(Math.sin(rad(s.obl)), .25) }); });
+  const disrupt = (e, ta, P) => { let f = 1; for (const w of eraWin) { const tArrW = (w.s.sIn - xLiner) / e.v; if (P < w.s.sIn - 1e-6) continue; // element passes through this plate's location
+      const firstArr = (w.s.sIn - xLiner) / JET[pr.kind || 'heat'].vt; const delay = tArrW - firstArr; const tAct = w.nera ? 4e-6 : 6e-6; if (delay < tAct) continue; // jet tip passes before plates move
+      if (w.nera && delay > w.m.nera.T + tAct) continue; const dJet = cal * .06; const cut = clamp(w.eta / (RHO_CU * dJet * e.v) * (w.nera ? 2.2 : 3.5), 0, .97); f *= 1 - cut; } return f; };
+  const sim = dpsm(pr, segs.map(s => ({ ...s })), xLiner, scale, disrupt);
+  for (const w of eraWin) { segEvents[w.si].notes.push(w.nera ? 'NERA bulge disrupted jet' : 'ERA flyers cut the jet'); (w.nera ? bulges : era).push({ plate: w.s.plate, t0: (w.s.sIn - xLiner) / JET[pr.kind || 'heat'].vt }); }
+  // reconstruct timeline: crater bottom position vs time
+  const tFly = .35 / Math.max(v0, 50), samples = []; const bodyStart = first - .35;
+  for (let k = 0; k <= 40; k++) samples.push({ t: tFly * k / 40, tip: bodyStart + (first - bodyStart) * k / 40, body: bodyStart + (first - bodyStart) * k / 40, L: pr.pen, v: v0, u: v0, seg: -1, pre: true });
+  const J = JET[pr.kind] || JET.heat; let lastP = xLiner, outcome = sim.done ? 'PERFORATED' : 'STOPPED';
+  const arr = sim.arrivals; const lastSeg = segs.length ? segs[segs.length - 1].sOut : 0;
+  for (const a of arr) { const P = a.free ? Math.min(lastSeg + .6, xLiner + J.vt * a.t) : a.P; const segI = segs.findIndex(s => P >= s.sIn && P <= s.sOut + 1e-6); samples.push({ t: tFly + a.t, tip: P, body: first, L: Math.max(0, (1 - a.i / arr.length)) * pr.pen, v: a.v || J.vtail, u: 0, seg: segI, jet: true }); lastP = P; }
+  samples.sort((x, y) => x.t - y.t);
+  // per-segment events
+  let behind = 0; segs.forEach((s, si) => { const ev = segEvents[si]; const reachT = samples.find(x => x.jet && x.tip >= s.sIn - 1e-6); const exitT = samples.find(x => x.jet && x.tip >= s.sOut - 1e-6);
+    ev.tIn = reachT ? reachT.t : null; ev.perforated = !!exitT; ev.tOut = exitT?.t; ev.Lout = 0; ev.vout = exitT ? exitT.v : 0; if (MATERIALS[s.mat].crew && reachT) ev.notes.push('CREW COMPARTMENT REACHED');
+    if (reachT && !MATERIALS[s.mat].air) { holes.push({ seg: si, sIn: s.sIn, sEnd: exitT ? s.sOut : sim.P, r: cal * .1, t0: reachT.t, t1: exitT ? exitT.t : samples[samples.length - 1].t, perforated: !!exitT });
+      if (exitT) { const dc = debrisCone(3000, .05, MATERIALS[s.mat].liner); for (let k = 0; k < dc.n; k++) { const a = rand() * 6.283, th = dc.half * Math.sqrt(rand()), sp = 1500 + 2500 * rand(); debris.push({ t0: exitT.t, p: [s.sOut, 0, 0], v: [Math.cos(th) * sp, Math.sin(th) * Math.cos(a) * sp, Math.sin(th) * Math.sin(a) * sp], s: .003 + rand() * .007, kind: 'spall' }); } } } });
+  segEvents.forEach(e => { if (e.tIn == null) e.skip = true; });
+  if (outcome === 'PERFORATED') { // residual: continue remaining jet into semi-infinite RHA behind last plate
+    const rest = dpsm(pr, [...segs.map(s => ({ ...s })), { sIn: lastSeg + .05, sOut: lastSeg + 5, mat: 'rha' }], xLiner, scale, disrupt); behind = Math.max(0, (rest.P - lastSeg - .05) * 1000); if (behind < 2) outcome = 'STOPPED'; }
+  const crewHit = outcome === 'PERFORATED' && segs.some(s => MATERIALS[s.mat].crew);
+  return { type: 'CE', samples, segEvents: segEvents.filter(e => !e.skip), debris, holes, era, bulges, outcome, ric: null, tEnd: samples[samples.length - 1].t + 2e-4, Lres: behind, vres: outcome === 'PERFORATED' ? J.vtail : 0, behind, crewHit, tDet: tFly, sDet: xLiner, bodyStart, start: bodyStart, scale };
+}
+// convenience for validation: semi-infinite RHA penetration of a shaped charge at a given standoff (calibrated)
+export function cePenetration(projKey, standoffCD = 1.8, layersFn) { const r = simulate({ proj: projKey, range: 0, plates: layersFn ? layersFn() : [{ mat: 'rha', x: 2.5, y: 0, z: 0, t: 5000, ax: 0, ay: 0, w: 1, h: 1 }] }); return r; }

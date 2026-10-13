@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PROJECTILES, CORES, MATERIALS, SCENARIOS, DISCLAIMER } from './data.js';
-import { simulate, impactVelocity, ribBoxes } from './physics.js';
+import { simulate, impactVelocity, ribBoxes, semiInfRHA } from './physics.js';
 import { buildProjectile } from './projectile.js';
 
 const $ = id => document.getElementById(id);
@@ -84,45 +84,56 @@ const tc = new TransformControls(camera, renderer.domElement); tc.setSize(mobile
 tc.addEventListener('dragging-changed', e => { controls.enabled = !e.value; });
 tc.addEventListener('objectChange', () => { const m = tc.object; if (!m) return; const p = S.plates[m.userData.i];
   p.x = +m.position.x.toFixed(3); p.y = +m.position.y.toFixed(3); p.z = +m.position.z.toFixed(3);
-  p.ax = Math.round(THREE.MathUtils.radToDeg(m.rotation.z)); p.ay = Math.round(THREE.MathUtils.radToDeg(m.rotation.y)); m.rotation.x = 0; syncPlateUI(); stale(); });
+  p.ax = Math.round(THREE.MathUtils.radToDeg(m.rotation.z)); p.ay = Math.round(THREE.MathUtils.radToDeg(m.rotation.y)); m.rotation.x = 0; syncPlateUI(); if (S.target !== 'Custom') markCustom(); stale(); });
 function select(i, ui = true) {
   S.sel = i; plateMeshes.forEach((m, k) => m.material.emissive.setHex(k === i ? 0x1d3d66 : 0)); if (i >= 0 && plateMeshes[i]) tc.attach(plateMeshes[i]); else tc.detach();
-  syncPlateUI(); if (ui && mobile && i >= 0) $('right').classList.add('open');
+  syncPlateUI(); if (ui && i >= 0) openPop(lastTap); else if (i < 0) closePop();
 }
 const ray = new THREE.Raycaster(); let down = null;
 renderer.domElement.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
-renderer.domElement.addEventListener('pointerup', e => { if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6 || tc.dragging) return;
+renderer.domElement.addEventListener('pointerup', e => { lastTap = [e.clientX + 16, e.clientY]; if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6 || tc.dragging) return;
   ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), camera);
   const h = ray.intersectObjects(plateMeshes, true).find(x => x.object.userData.i != null); if (h) select(h.object.userData.i); else if (!tc.axis) select(-1); });
 addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'Delete') delSel(); if (e.ctrlKey && e.key.toLowerCase() === 'd') { e.preventDefault(); dup(); } if (e.key === 'c') toggleSection(); if (e.key === 'Escape' || e.key === ' ') togglePlay(); if (e.key === 'f') fire(); });
 
-// ---------------- UI build ----------------
+// ---------------- UI build (simple 3-step flow + Advanced drawer) ----------------
 const groups = {}; for (const [k, p] of Object.entries(PROJECTILES)) (groups[p.country] ||= []).push(k);
-$('projList').innerHTML = Object.entries(groups).map(([g, ks]) => `<div class="grp">${g}</div><div class="btns">${ks.map(k => `<button class="b" data-p="${k}">${PROJECTILES[k].name}</button>`).join('')}</div>`).join('');
-$('cores').innerHTML = Object.entries(CORES).map(([k, c]) => `<button class="b" data-c="${k}">${c.name}</button>`).join('');
+$('round').innerHTML = Object.entries(groups).map(([g, ks]) => `<optgroup label="${g}">${ks.map(k => `<option value="${k}">${PROJECTILES[k].name}${PROJECTILES[k].type === 'KE' ? ' · APFSDS' : PROJECTILES[k].tandem ? ' · tandem HEAT' : ' · HEAT'}</option>`).join('')}</optgroup>`).join('');
+$('target').innerHTML = Object.entries(SCENARIOS).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('') + '<option value="custom">Custom…</option>';
+$('cores').innerHTML = Object.entries(CORES).map(([k, c]) => `<button data-c="${k}">${c.name}</button>`).join('');
 const mg = {}; for (const [k, m] of Object.entries(MATERIALS)) (mg[m.group] ||= []).push(k);
-$('mats').innerHTML = Object.entries(mg).map(([g, ks]) => `<div class="grp">${g}</div><div class="btns">${ks.map(k => `<button class="b" data-m="${k}">${MATERIALS[k].name}</button>`).join('')}</div>`).join('');
-$('scen').innerHTML = '<option value="">Scenario…</option>' + Object.entries(SCENARIOS).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
-document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => setProj(b.dataset.p));
+$('pMat').innerHTML = Object.entries(mg).map(([g, ks]) => `<optgroup label="${g}">${ks.map(k => `<option value="${k}">${MATERIALS[k].name}</option>`).join('')}</optgroup>`).join('');
+$('round').onchange = e => setProj(e.target.value);
+$('target').onchange = e => { const v = e.target.value; if (v === 'custom') markCustom(); else loadScenario(v); };
 document.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { S.core = b.dataset.c; syncProjUI(); stale(); });
-document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { if (S.sel < 0) return; S.plates[S.sel].mat = b.dataset.m; buildPlates(); });
+function markCustom() { S.target = 'Custom'; $('target').value = 'custom'; $('custom').classList.add('show'); renderChips(); overlay(); }
+function renderChips() { $('chips').innerHTML = S.plates.map((p, i) => `<button class="chip${i === S.sel ? ' on' : ''}" data-chip="${i}"><b>${i + 1}</b> ${MATERIALS[p.mat].name}<br><span class="hint">${p.t} mm · ${p.ax}°</span></button>`).join('');
+  document.querySelectorAll('[data-chip]').forEach(b => b.onclick = e => { const r = b.getBoundingClientRect(); lastTap = [r.right + 10, r.top]; select(+b.dataset.chip); }); }
+let lastTap = [innerWidth / 2, innerHeight / 3];
+function openPop([x, y] = lastTap) { const p = S.plates[S.sel]; if (!p) return; const pop = $('pop'); pop.classList.add('show');
+  $('popT').textContent = `Plate ${S.sel + 1}`; $('pMat').value = p.mat; $('iT').value = p.t; $('vT').textContent = p.t + ' mm'; $('iAX').value = p.ax; $('vAX').textContent = p.ax + '°';
+  if (innerWidth > 900) { pop.style.left = Math.min(innerWidth - 320, Math.max(390, x)) + 'px'; pop.style.top = Math.min(innerHeight - 330, Math.max(20, y - 40)) + 'px'; } }
+function closePop() { $('pop').classList.remove('show'); }
+$('popX').onclick = () => select(-1);
+const editPlate = (k, v) => { if (S.sel < 0) return; S.plates[S.sel][k] = v; markCustom(); buildPlates(); };
+$('pMat').onchange = e => editPlate('mat', e.target.value);
 const bind = (id, fn) => $(id).oninput = e => { fn(+e.target.value); };
+bind('iT', v => { editPlate('t', v); $('vT').textContent = v + ' mm'; }); bind('iAX', v => { editPlate('ax', v); $('vAX').textContent = v + '°'; });
 bind('iD', v => { S.D = v; syncProjUI(); stale(); }); bind('iL', v => { S.L = v; syncProjUI(); stale(); }); bind('iP', v => { S.pen = v; syncProjUI(); stale(); });
 bind('iV', v => { S.v0 = v; syncProjUI(); stale(); }); bind('iR', v => { S.range = v; syncProjUI(); stale(); }); bind('iPB', v => { $('vPB').textContent = v; });
-const pb = (id, k, f = x => x) => bind(id, v => { if (S.sel < 0) return; S.plates[S.sel][k] = f(v); buildPlates(); });
-pb('iT', 't'); pb('iAX', 'ax'); pb('iAY', 'ay'); pb('iX', 'x'); pb('iW', 'w'); pb('iH', 'h'); pb('iRB', 'ribs');
-$('add').onclick = () => { const last = S.plates[S.plates.length - 1]; S.plates.push({ mat: 'rha', x: last ? +(last.x + .25).toFixed(2) : 0, y: 0, z: 0, t: 30, ax: 0, ay: 0, w: 1, h: 1 }); S.sel = S.plates.length - 1; buildPlates(); };
-const delSel = () => { if (S.sel < 0) return; S.plates.splice(S.sel, 1); S.sel = -1; buildPlates(); };
-const dup = () => { if (S.sel < 0) return; const p = clone(S.plates[S.sel]); p.x = +(p.x + .15).toFixed(2); S.plates.splice(S.sel + 1, 0, p); S.sel++; buildPlates(); };
-$('del').onclick = delSel; $('del2').onclick = delSel; $('dup').onclick = dup; $('clr').onclick = () => { S.plates = []; S.sel = -1; S.target = 'Custom'; buildPlates(); };
-$('scen').onchange = e => { if (e.target.value) loadScenario(e.target.value); };
-$('tLeft').onclick = () => { $('left').classList.toggle('open'); $('right').classList.remove('open'); };
-$('tRight').onclick = () => { $('right').classList.toggle('open'); $('left').classList.remove('open'); };
-$('viewHd').onclick = () => $('view').classList.toggle('col'); $('resHd').onclick = () => $('results').classList.toggle('col');
+const pb = (id, k) => bind(id, v => editPlate(k, v));
+pb('iAY', 'ay'); pb('iX', 'x'); pb('iW', 'w'); pb('iH', 'h'); pb('iRB', 'ribs');
+$('add').onclick = () => { const last = S.plates[S.plates.length - 1]; S.plates.push({ mat: 'rha', x: last ? +(last.x + Math.max(.15, last.t / 1000 + .1)).toFixed(2) : 0, y: 0, z: 0, t: 30, ax: 0, ay: 0, w: 1, h: 1 }); S.sel = S.plates.length - 1; markCustom(); buildPlates(); frame(); openPop(); };
+const delSel = () => { if (S.sel < 0) return; S.plates.splice(S.sel, 1); S.sel = -1; markCustom(); buildPlates(); closePop(); };
+const dup = () => { if (S.sel < 0) return; const p = clone(S.plates[S.sel]); p.x = +(p.x + .15).toFixed(2); S.plates.splice(S.sel + 1, 0, p); S.sel++; markCustom(); buildPlates(); };
+$('trash').onclick = delSel; $('dup').onclick = dup; $('clr').onclick = () => { S.plates = []; S.sel = -1; markCustom(); buildPlates(); };
+const setAdv = on => { $('adv').classList.toggle('show', on); $('advBtn').textContent = on ? 'Advanced ▾' : 'Advanced ▸'; if (on) $('adv').scrollTop = 0; if (innerWidth > 900 && autoFrame) frame(true); };
+$('advBtn').onclick = () => setAdv(!$('adv').classList.contains('show')); $('advX').onclick = () => setAdv(false);
 $('sec').onclick = () => toggleSection(); bind('iSO', v => { $('vSO').textContent = v; secPlane.constant = v / 1000; });
 $('cmap').onclick = () => { S.mapMode = 1 - S.mapMode; $('cmap').textContent = 'Map: ' + (S.mapMode ? 'temperature' : 'velocity'); drawLegend(); };
 $('gMove').onclick = () => { tc.setMode('translate'); pillset(); }; $('gRot').onclick = () => { tc.setMode('rotate'); tc.showX = false; pillset(); };
 const pillset = () => { $('gMove').classList.toggle('on', tc.mode === 'translate'); $('gRot').classList.toggle('on', tc.mode === 'rotate'); tc.showX = tc.mode === 'translate'; };
+let autoFrame = true; $('autoF').onclick = () => { autoFrame = !autoFrame; $('autoF').classList.toggle('on', autoFrame); };
 $('rview').onclick = () => frame(); $('qual').onclick = () => setQuality(quality === 'high' ? 'low' : 'high');
 $('pp').onclick = () => togglePlay(); $('fire').onclick = () => fire();
 document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { speed = +b.dataset.sp; document.querySelectorAll('[data-sp]').forEach(x => x.classList.toggle('on', x === b)); });
@@ -138,20 +149,23 @@ function setProj(k, keepVals = false) {
 }
 function syncProjUI() {
   const p = PROJECTILES[S.proj], ke = p.type === 'KE';
-  document.querySelectorAll('[data-p]').forEach(b => b.classList.toggle('on', b.dataset.p === S.proj));
-  document.querySelectorAll('[data-c]').forEach(b => { b.classList.toggle('on', b.dataset.c === S.core); b.disabled = !ke; b.style.opacity = ke ? 1 : .4; });
+  $('round').value = S.proj;
+  document.querySelectorAll('[data-c]').forEach(b => { b.classList.toggle('on', b.dataset.c === S.core); b.disabled = !ke; b.style.opacity = ke ? 1 : .4; }); spec();
   $('slD').style.display = $('slL').style.display = ke ? '' : 'none'; $('slP').style.display = ke ? 'none' : '';
   for (const [i, v] of [['iD', S.D], ['iL', S.L], ['iP', S.pen], ['iV', S.v0], ['iR', S.range]]) $(i).value = v;
   $('vD').textContent = S.D; $('vL').textContent = S.L; $('vP').textContent = S.pen; $('vV').textContent = S.v0; $('vR').textContent = S.range; $('vPB').textContent = $('iPB').value;
   buildRod(); overlay();
 }
 function syncPlateUI() {
-  const p = S.plates[S.sel]; $('plName').innerHTML = p ? `Plate_${S.sel + 1}<br>${MATERIALS[p.mat].name}` : 'No plate selected';
-  document.querySelectorAll('[data-m]').forEach(b => b.classList.toggle('on', !!p && b.dataset.m === p.mat));
-  $('mdesc').textContent = p ? (MATERIALS[p.mat].desc || `${MATERIALS[p.mat].name}: ρ ${MATERIALS[p.mat].rho} kg/m³, KE eff. ×${MATERIALS[p.mat].te}, CE eff. ×${MATERIALS[p.mat].tc} vs RHA (est.)`) : 'Tap a plate to select it. Drag the gizmo to move/rotate.';
-  if (!p) return;
-  for (const [i, k, f] of [['T', 't'], ['AX', 'ax'], ['AY', 'ay'], ['X', 'x'], ['W', 'w'], ['H', 'h'], ['RB', 'ribs']]) { $('i' + i).value = p[k] || 0; $('v' + i).textContent = p[k] || 0; }
+  const p = S.plates[S.sel]; const m = p && MATERIALS[p.mat];
+  $('plName').textContent = p ? `Plate ${S.sel + 1}: ${m.name} · ρ ${m.rho} kg/m³${m.R ? ` · R ≈ ${(m.R / 1e9).toFixed(1)} GPa` : ''} (public estimate)` : 'Tap a plate to select it.';
+  renderChips(); if (!p) return;
+  for (const [i, k] of [['T', 't'], ['AX', 'ax'], ['AY', 'ay'], ['X', 'x'], ['W', 'w'], ['H', 'h'], ['RB', 'ribs']]) { $('i' + i).value = p[k] || 0; $('v' + i).textContent = (p[k] || 0) + (i === 'T' ? ' mm' : i === 'AX' ? '°' : ''); }
+  $('pMat').value = p.mat;
 }
+function spec() { const p = PROJECTILES[S.proj], vi = impactVelocity(p, S.v0, S.range), mass = rod ? rod.mass : 0;
+  $('spec').textContent = p.type === 'KE' ? `${S.v0} m/s muzzle (${vi.toFixed(0)} at ${S.range} m) · rod ${S.L} mm × ${S.D} mm · ${(mass).toFixed(1)} kg · ${CORES[S.core].name}`
+    : `${S.v0} m/s · ~${S.pen} mm RHA nominal${p.tandem ? ' · tandem' : ''} · ${p.cal} mm · ~${mass.toFixed(1)} kg`; }
 function overlay() {
   const p = PROJECTILES[S.proj]; $('ovTitle').textContent = `${p.type === 'KE' ? p.cal + 'mm ' : ''}${p.name} ${p.type === 'KE' ? 'APFSDS' : p.tandem ? '(tandem HEAT)' : 'HEAT'}`;
   $('ovV').textContent = `${impactVelocity(p, S.v0, S.range).toFixed(0)} m/s`; $('ovR').textContent = `${S.range} m`; $('ovT').textContent = S.target || 'Custom plate setup';
@@ -179,14 +193,14 @@ function buildRod() {
   if (rod) { dyn.remove(rod.group); rod.group.traverse(o => o.geometry?.dispose()); }
   const p = PROJECTILES[S.proj]; rod = buildProjectile(p, { D: S.D, L: S.L, core: S.core }, rodMat); dyn.add(rod.group);
   $('mass').textContent = `Mass: ${(rod.mass * 1000).toFixed(0)} g ${p.type === 'KE' ? '(penetrator + fins, from geometry × density)' : '(approx.)'}`; $('pinfo').textContent = rod.info + ' · public estimate';
-  placeRodIdle();
+  placeRodIdle(); spec();
 }
 function placeRodIdle() { if (!rod) return; const first = Math.min(0, ...S.plates.map(p => p.x - p.t / 2000 - .1)); rod.group.position.set(first - .35, 0, 0); rod.group.rotation.set(0, 0, 0); rod.group.visible = true; tipPlane.constant = 1e3; mapU.uOn.value = 0; }
 let holes = [], debrisMesh = null, jet = null, tipCap = null, flyers = [];
 function clearSim() {
   sim = null; playing = false; for (const o of [...dyn.children]) if (!rod || o !== rod.group) { dyn.remove(o); o.traverse?.(x => x.geometry?.dispose()); }
   holes = []; debrisMesh = null; jet = null; tipCap = null; flyers = []; plateMeshes.forEach(m => { m.visible = true; m.scale.set(1, 1, 1); });
-  placeRodIdle(); drawLegend(); $('rtab').innerHTML = 'Press FIRE to run the shot.'; drawChart(); $('tread').textContent = '0.0 µs'; $('scrub').value = 0; overlay();
+  placeRodIdle(); drawLegend(); $('rtab').innerHTML = 'Press FIRE to run the shot.'; $('verdict').classList.remove('show'); drawChart(); $('tread').textContent = '0.0 µs'; $('scrub').value = 0; overlay();
 }
 function fire() {
   clearSim(); const p = PROJECTILES[S.proj];
@@ -210,7 +224,7 @@ function fire() {
   if (p.type === 'CE') { jet = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 10).rotateZ(Math.PI / 2).translate(.5, 0, 0), rodMat(0xffaa66, .3, .8)); jet.visible = false; dyn.add(jet); }
   tipCap = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), regClip(new THREE.MeshBasicMaterial({ color: 0xffaa55, toneMapped: false }))); tipCap.visible = false; dyn.add(tipCap);
   for (const e of sim.era) { const pm = plateMeshes[e.plate]; const f = []; for (const s of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(S.plates[e.plate].t / 4000, S.plates[e.plate].h, S.plates[e.plate].w), pm.material); m.quaternion.copy(pm.quaternion); m.visible = false; dyn.add(m); f.push({ m, s }); } flyers.push({ e, pm, f }); }
-  simT = 0; playing = true; $('pp').textContent = '❚❚'; drawLegend(); showResults(); if (mobile) { $('left').classList.remove('open'); $('right').classList.remove('open'); }
+  simT = 0; playing = true; $('pp').textContent = '❚❚'; drawLegend(); showResults(); closePop(); select(-1, false); if (autoFrame) frame(true);
 }
 function sampleAt(t) { const a = sim.samples; let lo = 0, hi = a.length - 1; if (t <= a[0].t) return a[0]; if (t >= a[hi].t) return a[hi];
   while (hi - lo > 1) { const m = (lo + hi) >> 1; if (a[m].t <= t) lo = m; else hi = m; } const A = a[lo], B = a[hi], k = (t - A.t) / (B.t - A.t || 1); const o = { ...A }; for (const f of ['tip', 'tail', 'L', 'v', 'u', 'body']) if (A[f] != null) o[f] = A[f] + (B[f] - A[f]) * k; return o; }
@@ -247,7 +261,7 @@ function summarize() { return { outcome: sim.outcome, vImpact: sim.vImpact, behi
 function showResults() {
   const r = sim, ke = r.type === 'KE';
   $('rtab').innerHTML = `<span class="out ${r.outcome}">${r.outcome}</span> ${r.crewHit ? '<b class="note">· crew compartment reached</b>' : ''}
-    <div class="desc" style="margin:2px 0">Impact ${r.vImpact.toFixed(0)} m/s · ${ke ? `semi-inf. RHA (Lanz–Odermatt) ${r.Plo.toFixed(0)} mm · ` : ''}behind-armor residual <b>${r.behind.toFixed(0)} mm RHA</b>${ke && r.outcome === 'PERFORATED' ? ` · rod ${r.Lres.toFixed(0)} mm @ ${r.vres.toFixed(0)} m/s` : ''}</div>
+    <div class="desc" style="margin:2px 0">Impact ${r.vImpact.toFixed(0)} m/s · ${ke ? `semi-inf. RHA equivalent ${(semiInfRHA(r.Ltot * .93, r.D, r.vImpact, CORES[S.core].rho, CORES[S.core].Y) * 1000).toFixed(0)} mm · ` : ''}${ke && r.yaw ? `exit yaw ${r.yaw.toFixed(1)}° · ` : ''}behind-armor residual <b>${r.behind.toFixed(0)} mm RHA</b>${ke && r.outcome === 'PERFORATED' ? ` · rod ${r.Lres.toFixed(0)} mm @ ${r.vres.toFixed(0)} m/s` : ''}</div>
     <table><tr><th>#</th><th>Material</th><th>LOS mm</th><th>θ</th><th>${ke ? 'Rod out mm' : 'Jet left mm'}</th><th>${ke ? 'v out' : 'tip v'}</th><th>Result</th></tr>
     ${r.plates.map(p => `<tr><td>${p.i + 1}</td><td>${MATERIALS[p.mat].name}</td><td>${p.hit ? p.los.toFixed(0) : 'miss'}</td><td>${p.hit ? p.obl.toFixed(0) + '°' : ''}</td><td>${p.Lres != null ? p.Lres.toFixed(0) : '—'}</td><td>${p.vres != null ? p.vres.toFixed(0) : '—'}</td><td>${!p.reached ? (p.hit ? 'not reached' : '') : p.notes.some(n => /ricochet/.test(n)) ? 'RICOCHET' : p.perforated ? 'perforated' : 'stopped'}${p.notes.length ? `<br><i class="note">${p.notes.join('; ')}</i>` : ''}</td></tr>`).join('')}</table>
     <div class="desc">${DISCLAIMER}</div>`;
@@ -266,10 +280,17 @@ function drawChart() {
   const cx = X(simT); g.strokeStyle = '#fff'; g.beginPath(); g.moveTo(cx, 50); g.lineTo(cx, H - 36); g.stroke();
 }
 
+function verdict() { const r = sim, ke = r.type === 'KE'; const los = r.plates.filter(p => p.hit && p.reached).reduce((a, p) => a + p.los, 0);
+  const third = r.outcome === 'RICOCHET' ? [`${(r.plates.find(p => p.notes.some(n => /ricochet/.test(n)))?.obl ?? 0).toFixed(0)}°`, 'impact obliquity']
+    : r.outcome === 'PERFORATED' ? (ke ? [`${r.Lres.toFixed(0)} mm`, `rod left @ ${r.vres.toFixed(0)} m/s`] : [`${r.behind.toFixed(0)} mm`, 'RHA left in jet']) : [`${(r.plates.filter(p => p.reached).length)}/${r.plates.length}`, 'plates reached'];
+  $('vWord').className = r.outcome; $('vWord').textContent = r.outcome;
+  $('vNums').innerHTML = [[`${r.vImpact.toFixed(0)}`, 'impact m/s'], [`${los.toFixed(0)} mm`, 'armor LOS hit'], third].map(([a, b]) => `<div><b>${a}</b><span>${b}</span></div>`).join('');
+  $('verdict').classList.add('show'); }
+
 // ---------------- scenarios, save/load/share ----------------
-function loadScenario(k) { const sc = SCENARIOS[k]; S.plates = clone(sc.plates); S.target = sc.target; S.range = sc.range; S.sel = -1; setProj(sc.proj); buildPlates(); frame(); $('scen').value = k; overlay(); }
+function loadScenario(k) { const sc = SCENARIOS[k]; S.plates = clone(sc.plates); S.target = sc.target; S.range = sc.range; S.sel = -1; setProj(sc.proj); buildPlates(); frame(); $('target').value = k; $('custom').classList.remove('show'); overlay(); }
 const setup = () => ({ proj: S.proj, core: S.core, D: S.D, L: S.L, pen: S.pen, v0: S.v0, range: S.range, target: S.target, plates: S.plates });
-function applySetup(o) { Object.assign(S, { proj: o.proj in PROJECTILES ? o.proj : 'm829a3', core: o.core in CORES ? o.core : 'du', D: +o.D || 22, L: +o.L || 800, pen: +o.pen || 500, v0: +o.v0 || 1500, range: +o.range || 0, target: String(o.target || 'Custom'), plates: (o.plates || []).filter(p => p.mat in MATERIALS).map(p => ({ mat: p.mat, x: +p.x || 0, y: +p.y || 0, z: +p.z || 0, t: +p.t || 10, ax: +p.ax || 0, ay: +p.ay || 0, w: +p.w || 1, h: +p.h || 1, ribs: +p.ribs || 0 })), sel: -1 }); syncProjUI(); buildPlates(); frame(); }
+function applySetup(o) { Object.assign(S, { proj: o.proj in PROJECTILES ? o.proj : 'm829a3', core: o.core in CORES ? o.core : 'du', D: +o.D || 22, L: +o.L || 800, pen: +o.pen || 500, v0: +o.v0 || 1500, range: +o.range || 0, target: String(o.target || 'Custom'), plates: (o.plates || []).filter(p => p.mat in MATERIALS).map(p => ({ mat: p.mat, x: +p.x || 0, y: +p.y || 0, z: +p.z || 0, t: +p.t || 10, ax: +p.ax || 0, ay: +p.ay || 0, w: +p.w || 1, h: +p.h || 1, ribs: +p.ribs || 0 })), sel: -1 }); syncProjUI(); buildPlates(); const sk = Object.keys(SCENARIOS).find(k => SCENARIOS[k].target === S.target); if (sk) { $('target').value = sk; $('custom').classList.remove('show'); } else markCustom(); frame(); }
 const store = () => { try { return JSON.parse(localStorage.getItem('armorSandbox.setups') || '{}'); } catch { return {}; } };
 function refreshLoad() { $('load').innerHTML = '<option value="">Load…</option>' + Object.keys(store()).map(n => `<option>${n.replace(/</g, '')}</option>`).join(''); }
 $('save').onclick = () => { const s = store(); const name = `${PROJECTILES[S.proj].name} vs ${S.target || 'custom'} ${new Date().toLocaleTimeString()}`; s[name] = setup(); localStorage.setItem('armorSandbox.setups', JSON.stringify(s)); refreshLoad(); $('save').textContent = 'Saved ✓'; setTimeout(() => $('save').textContent = 'Save', 1200); };
@@ -280,17 +301,26 @@ $('share').onclick = () => { const h = '#s=' + enc(setup()); history.replaceStat
 refreshLoad();
 
 // ---------------- camera framing, resize, loop ----------------
-function frame() { const b = new THREE.Box3().setFromObject(plateGroup); if (b.isEmpty()) b.set(new THREE.Vector3(-.5, -.5, -.5), new THREE.Vector3(.5, .5, .5));
-  const x0 = Math.min(b.min.x, rod.group.position.x - rod.length) - .05, x1 = b.max.x + .2, cx = (x0 + x1) / 2, cy = (b.min.y + b.max.y) / 2;
-  const w = x1 - x0, h = b.max.y - b.min.y + .2, vis = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  const d = Math.max(w / camera.aspect, h) / vis * (mobile ? 1.5 : 2.0); controls.target.set(cx, cy - (mobile ? .1 : .12) * d, 0); camera.position.set(cx + d * .05, cy + d * .1, d); controls.update(); }
+// frame(shot): fit rod start → last plate (+ debris room) so the rod and plates stay visible; animated
+let camTween = null;
+function frame(shot = false) { const b = new THREE.Box3().setFromObject(plateGroup); if (b.isEmpty()) b.set(new THREE.Vector3(-.5, -.5, -.5), new THREE.Vector3(.5, .5, .5));
+  const x0 = Math.min(b.min.x, rod.group.position.x - rod.length) - .05, x1 = b.max.x + (shot ? .45 : .2), cy = (Math.max(b.min.y, -.9) + Math.min(b.max.y, .9)) / 2;
+  const w = x1 - x0, h = Math.min(b.max.y - b.min.y, 1.8) + .2, vis = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  // leave room for the control card: left card on desktop, bottom sheet on phones
+  const narrow = innerWidth <= 900, advOpen = !narrow && $('adv').classList.contains('show'), left = narrow ? 0 : 400, right = innerWidth - (advOpen ? 410 : 0);
+  const effW = (right - left) / innerWidth, effH = narrow ? .55 : 1;
+  const d = Math.max(w / (camera.aspect * effW), h / effH) / vis * 1.12, cx = (x0 + x1) / 2 - ((left + right) / 2 / innerWidth - .5) * camera.aspect * vis * d;
+  const tgt = new THREE.Vector3(cx, cy - (narrow ? .22 : .02) * d * vis, 0), pos = new THREE.Vector3(cx + d * .18, cy + d * .2, d);
+  if (shot) camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: pos, q1: tgt }; else { camTween = null; controls.target.copy(tgt); camera.position.copy(pos); controls.update(); } }
+controls.addEventListener('start', () => { camTween = null; });
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now(), dt = Math.min(.1, (now - last) / 1000); last = now;
   if (sim && playing) { simT += dt / +$('iPB').value * sim.tEnd * speed; if (simT >= sim.tEnd) { simT = sim.tEnd; playing = false; $('pp').textContent = '▶'; } }
-  if (sim) { updateSim(); drawChart(); }
+  if (camTween) { camTween.t = Math.min(1, camTween.t + dt / .6); const k = camTween.t * camTween.t * (3 - 2 * camTween.t); camera.position.lerpVectors(camTween.p0, camTween.p1, k); controls.target.lerpVectors(camTween.q0, camTween.q1, k); if (camTween.t >= 1) camTween = null; }
+  if (sim) { updateSim(); drawChart(); if (!playing && simT >= sim.tEnd && !$('verdict').classList.contains('show')) verdict(); }
   controls.update(); drawScale(); renderer.render(scene, camera);
 });
 
@@ -299,7 +329,6 @@ let booted = false;
 try { if (location.hash.startsWith('#s=')) { const o = dec(location.hash.slice(3)); rod = null; buildRod(); applySetup(o); booted = true; } } catch (e) { console.warn('bad share link', e); }
 if (!booted) { buildRod(); loadScenario('strv103'); }
 setQuality(quality); toggleSection(false); pillset();
-if (mobile) { $('view').classList.add('col'); }
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW', e));
-window.__app = { S, loadScenario, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
+window.__app = { S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
 window.__ready = true;
