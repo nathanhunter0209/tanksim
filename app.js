@@ -8,6 +8,12 @@ import { simulate, impactVelocity, ribBoxes, semiInfRHA } from './physics.js';
 import { buildProjectile } from './projectile.js';
 import { holeHook, createDamage } from './damage.js';
 import { initCompare } from './compare.js';
+import { pbrParams } from './materials.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { runSweep, drawSweep, sweepSummary } from './sweep.js';
 const embed = new URLSearchParams(location.search).has('embed'); if (embed) document.body.classList.add('embed');
 addEventListener('error', e => (window.__errs ||= []).push(String(e.message)));
@@ -25,11 +31,18 @@ const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(
 const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, .01, 100);
 const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
 const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(2, 5, 4); key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
-Object.assign(key.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3, near: .5, far: 15 }); key.shadow.bias = -.0005; key.shadow.normalBias = .01; key.shadow.radius = 4;
-scene.add(key, new THREE.HemisphereLight(0xffffff, 0x8a8f94, .8));
-const rim = new THREE.DirectionalLight(0xdfe8ff, .8); rim.position.set(-3, 2, -4); scene.add(rim);
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: .18 })); ground.rotation.x = -Math.PI / 2; ground.position.y = -1.05; ground.receiveShadow = true; scene.add(ground);
-const grid = new THREE.GridHelper(20, 100, 0xb5b8bb, 0xbdc0c3); grid.position.y = -1.049; scene.add(grid);
+Object.assign(key.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3, near: .5, far: 15 }); key.shadow.bias = -.0005; key.shadow.normalBias = .01; key.shadow.radius = 7; key.shadow.blurSamples = 16;
+scene.add(key, new THREE.HemisphereLight(0xf6f8ff, 0x8a8f94, .55));
+const fill = new THREE.DirectionalLight(0xfff4e8, .45); fill.position.set(4, 1.5, -2); scene.add(fill); // soft warm fill
+const rim = new THREE.DirectionalLight(0xdfe8ff, 1.1); rim.position.set(-3, 2, -4); scene.add(rim);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: .22 })); ground.rotation.x = -Math.PI / 2; ground.position.y = -1.05; ground.receiveShadow = true; scene.add(ground);
+const grid = new THREE.GridHelper(20, 100, 0xa9adb1, 0xb3b7ba); grid.material.transparent = true; grid.material.opacity = .45; grid.position.y = -1.049; scene.add(grid); // subtle grid floor
+// soft contact shadows under each plate (cheap radial blobs)
+const blobTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(.5, 'rgba(0,0,0,.25)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c); })();
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, opacity: .8 }), contactGroup = new THREE.Group(); scene.add(contactGroup);
+let composer = null, bloom = null;
+function setupComposer() { composer?.dispose?.(); composer = null; if (quality !== 'high') return; composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, camera));
+  bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .6, .45, 1.0); composer.addPass(bloom); composer.addPass(new OutputPass()); } // bloom only picks up HDR (>1) hot metal / jet / tracer
 const shotLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-3, 0, 0), new THREE.Vector3(4, 0, 0)]), new THREE.LineDashedMaterial({ color: 0x5577aa, dashSize: .03, gapSize: .03, transparent: true, opacity: .5 })); shotLine.computeLineDistances(); scene.add(shotLine);
 
 // section plane (keeps z < offset), hatch cap trick on back faces
@@ -38,8 +51,8 @@ const tipPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 1e3);
 const clipMats = new Set();
 const clipList = m => sectionOn ? [secPlane, ...(m.userData.tip ? [tipPlane] : [])] : (m.userData.tip ? [tipPlane] : []);
 function regClip(m, tip = false) { m.userData.tip = tip; m.clippingPlanes = clipList(m); clipMats.add(m); return m; }
-function capMat(color, extra = {}) {
-  const m = new THREE.MeshStandardMaterial({ color, roughness: .55, metalness: .25, side: THREE.DoubleSide, ...extra });
+function capMat(color, extra = {}, key = null) {
+  const m = new THREE.MeshStandardMaterial({ ...pbrParams(key, color, quality !== 'high'), side: THREE.DoubleSide, ...extra });
   m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
     if (!gl_FrontFacing) { float h = step(.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 9.)); gl_FragColor = vec4(mix(diffuseColor.rgb * .55, diffuseColor.rgb * .8, h), 1.); }`); };
   return regClip(holeHook(m));
@@ -63,23 +76,26 @@ function rodMat(color, rough, metal) {
 
 // ---------------- state ----------------
 const S = { proj: 'm829a3', core: 'du', D: 22, L: 800, pen: 500, v0: 1555, range: 1000, plates: [], target: '', mapMode: 0, sel: -1 };
-let inspecting = false, plateMeshes = [], sim = null, simT = 0, playing = false, speed = 1, built = null;
+let impactZoom = true, izState = null, inspecting = false, plateMeshes = [], sim = null, simT = 0, playing = false, speed = 1, built = null;
 const clone = o => JSON.parse(JSON.stringify(o));
 
 // ---------------- plates ----------------
 const plateGroup = new THREE.Group(); scene.add(plateGroup);
-const edgeMat = new THREE.LineBasicMaterial({ color: 0x2a2e33, transparent: true, opacity: .55 });
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x2a2e33, transparent: true, opacity: .3 });
 function buildPlates() {
   for (const m of plateMeshes) { plateGroup.remove(m); m.traverse(o => o.geometry?.dispose()); }
   plateMeshes = S.plates.map((p, i) => {
-    const mat = MATERIALS[p.mat]; const g = new THREE.BoxGeometry(p.t / 1000, p.h, p.w);
-    const m = new THREE.Mesh(g, capMat(mat.color, mat.crew ? { transparent: true, opacity: .18, depthWrite: false } : {}));
+    const mat = MATERIALS[p.mat], tt = p.t / 1000, bev = Math.min(tt * .3, .004); const g = new THREE.BoxGeometry(tt, p.h, p.w);
+    const gv = !mat.crew && bev > .0008 ? new RoundedBoxGeometry(tt, p.h, p.w, quality === 'high' ? 2 : 1, bev) : g; // beveled edges
+    const m = new THREE.Mesh(gv, capMat(mat.color, mat.crew ? { transparent: true, opacity: .18, depthWrite: false } : {}, mat.crew ? null : p.mat));
     m.castShadow = !mat.crew; m.receiveShadow = true; m.userData.i = i;
     m.position.set(p.x, p.y, p.z); m.rotation.order = 'YZX'; m.rotation.set(0, THREE.MathUtils.degToRad(p.ay), THREE.MathUtils.degToRad(p.ax));
     const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat); e.raycast = () => {}; m.add(e);
     for (const r of ribBoxes(p)) { const rb = new THREE.Mesh(new THREE.BoxGeometry(r.half[0] * 2, r.half[1] * 2, r.half[2] * 2), m.material); rb.position.set(...r.off); rb.castShadow = true; rb.userData.i = i; m.add(rb); const re = new THREE.LineSegments(new THREE.EdgesGeometry(rb.geometry), edgeMat); re.raycast = () => {}; rb.add(re); }
     plateGroup.add(m); return m;
   });
+  contactGroup.clear(); for (const p of S.plates) { if (MATERIALS[p.mat].crew) continue; const ex = Math.abs(p.h * Math.sin(THREE.MathUtils.degToRad(p.ax))) + p.t / 1000 + .25;
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(ex, p.w + .25), blobMat); b.rotation.x = -Math.PI / 2; b.position.set(p.x, -1.048, p.z); contactGroup.add(b); }
   if (S.sel >= S.plates.length) S.sel = S.plates.length - 1; select(S.sel, false); stale();
 }
 function stale() { clearSim(); }
@@ -146,7 +162,7 @@ $('scrub').oninput = e => { if (!sim) return; playing = false; $('pp').textConte
 function toggleSection(v = !sectionOn) { sectionOn = v; $('sec').textContent = 'Section: ' + (v ? 'on' : 'off'); $('sec').classList.toggle('on', v); for (const m of clipMats) { m.clippingPlanes = clipList(m); m.needsUpdate = true; } }
 function togglePlay() { if (!sim) return; playing = !playing; if (playing && simT >= sim.tEnd) simT = 0; $('pp').textContent = playing ? '❚❚' : '▶'; }
 function setQuality(q) { quality = q; $('qual').textContent = 'Quality: ' + (q === 'high' ? 'High' : 'Low'); renderer.setPixelRatio(Math.min(devicePixelRatio, q === 'high' ? 2 : 1)); renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = q === 'high'; scene.traverse(o => { if (o.material) o.material.needsUpdate = true; }); }
+  renderer.shadowMap.enabled = q === 'high'; scene.traverse(o => { if (o.material) o.material.needsUpdate = true; }); setupComposer(); }
 
 function setProj(k, keepVals = false) {
   const p = PROJECTILES[k]; S.proj = k; if (!keepVals) { S.v0 = p.v0; if (p.type === 'KE') { S.core = p.core; S.D = p.D; S.L = p.L; } else S.pen = p.pen; }
@@ -196,13 +212,15 @@ const dyn = new THREE.Group(); scene.add(dyn);
 let rod = null;
 function buildRod() {
   if (rod) { dyn.remove(rod.group); rod.group.traverse(o => o.geometry?.dispose()); }
-  const p = PROJECTILES[S.proj]; rod = buildProjectile(p, { D: S.D, L: S.L, core: S.core }, rodMat); dyn.add(rod.group);
+  if (rod?.sabot) { dyn.remove(rod.sabot.group); rod.sabot.group.traverse(o => o.geometry?.dispose()); }
+  const p = PROJECTILES[S.proj]; rod = buildProjectile(p, { D: S.D, L: S.L, core: S.core, seg: quality === 'high' ? 64 : 28 }, rodMat); dyn.add(rod.group); if (rod.sabot) dyn.add(rod.sabot.group);
   $('mass').textContent = `Mass: ${(rod.mass * 1000).toFixed(0)} g ${p.type === 'KE' ? '(penetrator + fins, from geometry × density)' : '(approx.)'}`; $('pinfo').textContent = rod.info + ' · public estimate';
   placeRodIdle(); spec();
 }
-function placeRodIdle() { if (!rod) return; const first = Math.min(0, ...S.plates.map(p => p.x - p.t / 2000 - .1)); rod.group.position.set(first - .35, 0, 0); rod.group.rotation.set(0, 0, 0); rod.group.visible = true; tipPlane.constant = 1e3; mapU.uOn.value = 0; }
+function placeRodIdle() { if (!rod) return; if (rod.sabot) { rod.sabot.petals.forEach(q => { q.piv.position.set(0, 0, 0); q.piv.rotation.set(0, 0, 0); }); } const first = Math.min(0, ...S.plates.map(p => p.x - p.t / 2000 - .1)); rod.group.position.set(first - .35, 0, 0); rod.group.rotation.set(0, 0, 0); rod.group.visible = true; if (rod.sabot) { rod.sabot.group.position.set(first - .35 + rod.sabot.group.userData.offset, 0, 0); rod.sabot.group.visible = true; } tipPlane.constant = 1e3; mapU.uOn.value = 0; }
 let holes = [], debrisMesh = null, jet = null, tipCap = null, flyers = [], damage = null;
 function clearSim() {
+  izState = null;
   inspecting = false; if (debrisMesh) debrisMesh.visible = true;
   damage?.dispose(); damage = null;
   sim = null; playing = false; for (const o of [...dyn.children]) if (!rod || o !== rod.group) { dyn.remove(o); o.traverse?.(x => x.geometry?.dispose()); }
@@ -246,8 +264,10 @@ function updateSim() {
     else { const dtR = t - sim.ric.t, pl = S.plates[sim.ric.plate], a = THREE.MathUtils.degToRad(pl.ax), dir = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).normalize(); // deflect along the face
       rod.group.position.set(sim.ric.s, 0, 0).addScaledVector(dir, v0 * .75 * dtR); rod.group.rotation.set(0, 0, a); tipPlane.constant = 1e3; }
     const eroding = s.seg >= 0 && s.u < s.v - 1; mapU.uHot.value = Math.max(mapU.uHot.value * .0 + (eroding ? 1 : 0), s.L < rod.length * .9 ? .55 * Math.exp(-(t - (sim.segEvents.at(-1)?.tOut || t)) / 3e-4) : 0);
-    tipCap.visible = eroding && !ric; if (tipCap.visible) { tipCap.position.set(s.tip, 0, 0); tipCap.scale.set(S.D / 1000 * .35, S.D / 1000 * (.75 + .35 * Math.min(1, (s.v - s.u) / 900)), S.D / 1000 * (.75 + .35 * Math.min(1, (s.v - s.u) / 900) /* mushroomed head */)); tipCap.material.color.setRGB(...cmap(S.mapMode ? 1 : s.v / v0)); }
+    tipCap.visible = eroding && !ric; if (tipCap.visible) { tipCap.position.set(s.tip, 0, 0); tipCap.scale.set(S.D / 1000 * .35, S.D / 1000 * (.75 + .35 * Math.min(1, (s.v - s.u) / 900)), S.D / 1000 * (.75 + .35 * Math.min(1, (s.v - s.u) / 900) /* mushroomed head */)); tipCap.material.color.setRGB(...cmap(S.mapMode ? 1 : s.v / v0)).multiplyScalar(2.4); }
     rod.group.visible = s.L > 0.001 || t < 1e-9;
+    if (rod.sabot) { const sb = rod.sabot, x0 = sim.samples[0].tail + rod.length + sb.group.userData.offset, tt = Math.max(0, t - sim.samples[0].t); // petals peel away from the rod after the muzzle
+      sb.group.position.set(x0 + v0 * .8 * tt, 0, 0); sb.group.visible = !inspecting; sb.petals.forEach(q => { q.piv.position.copy(q.dir).multiplyScalar(Math.min(.4, 420 * tt)); q.piv.rotation.set(0, 0, 0); q.piv.rotateOnAxis(new THREE.Vector3(0, -q.dir.z, q.dir.y), -Math.min(1.2, tt * 5500)); }); }
   } else {
     const det = t >= sim.tDet; rod.group.visible = !det || t < sim.tDet + 4e-5; rod.group.position.set((det ? sim.samples[40].body : s.body) - 0, 0, 0); tipPlane.constant = 1e3; mapU.uVal.value = .1;
     jet.visible = false; if (jet.visible) { const tail = sim.sDet + Math.min(2000 * (t - sim.tDet), Math.max(0, s.tip - sim.sDet) * .6); const r = p.cal / 1000 * .035; jet.position.set(tail, 0, 0); jet.scale.set(Math.max(.001, s.tip - tail), r, r); mapU.uJet.value = 1; mapU.uTip.value = s.tip; mapU.uTail.value = tail; }
@@ -329,15 +349,15 @@ function inspect(side = 'rear') { if (!sim || !sim.holes.length) return false; c
   const x = side === 'rear' && h.perforated ? h.sEnd : h.sIn, d = Math.max(.16, (S.D || 30) / 1000 * 12), sgn = side === 'rear' && h.perforated ? 1 : -1;
   const tgt = new THREE.Vector3(x, 0, 0), pos = new THREE.Vector3(x + sgn * d * .4, d * .3, d * .9); inspecting = true;
   camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: pos, q1: tgt }; return true; }
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); composer?.setSize(innerWidth, innerHeight); });
 camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now(), dt = Math.min(.1, (now - last) / 1000); last = now; if (cmpActive) return;
-  if (sim && playing) { simT += dt / +$('iPB').value * sim.tEnd * speed; if (simT >= sim.tEnd) { simT = sim.tEnd; playing = false; $('pp').textContent = '▶'; } }
+  const izk = impactZoomTick(now); if (sim && playing) { simT += dt / +$('iPB').value * sim.tEnd * speed * izk; if (simT >= sim.tEnd) { simT = sim.tEnd; playing = false; $('pp').textContent = '▶'; } }
   if (camTween) { camTween.t = Math.min(1, camTween.t + dt / .6); const k = camTween.t * camTween.t * (3 - 2 * camTween.t); camera.position.lerpVectors(camTween.p0, camTween.p1, k); controls.target.lerpVectors(camTween.q0, camTween.q1, k); if (camTween.t >= 1) camTween = null; }
   if (sim) { updateSim(); drawChart(); if (!playing && simT >= sim.tEnd && !$('verdict').classList.contains('show')) verdict(); }
-  controls.update(); drawScale(); renderer.render(scene, camera);
+  controls.update(); drawScale(); if (composer) composer.render(); else renderer.render(scene, camera);
 });
 
 // boot
@@ -346,6 +366,13 @@ try { if (location.hash.startsWith('#s=')) { const o = dec(location.hash.slice(3
 if (!booted) { buildRod(); loadScenario('strv103'); }
 setQuality(quality); toggleSection(false); pillset();
 if (!embed && 'serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW', e));
+// impact zoom: brief close-up + slow-mo at first impact (state declared at top)
+$('izoom').onclick = () => { impactZoom = !impactZoom; $('izoom').classList.toggle('on', impactZoom); };
+function impactZoomTick(nowMs) { if (!sim || !impactZoom || embed) return 1;
+  if (!izState && playing && sim.holes.length && simT >= sim.holes[0].t0) { const h = sim.holes[0], d = Math.max(.3, (S.D || 30) / 1000 * 18); izState = { until: nowMs + 1100 };
+    camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: new THREE.Vector3(h.sIn - d * .55, d * .3, d * .85), q1: new THREE.Vector3(h.sIn + .05, 0, 0) }; }
+  if (izState && !izState.back && nowMs > izState.until) { izState.back = true; frame(true); }
+  return izState && !izState.back ? .3 : 1; }
 let swKind = 'range', lastSweep = null;
 const swPlates = () => { $('swPlate').innerHTML = S.plates.map((p, i) => `<option value="${i}">Plate ${i + 1}: ${MATERIALS[p.mat].name}</option>`).join(''); const i = S.plates.findIndex(p => MATERIALS[p.mat].R >= 3e9); $('swPlate').value = Math.max(0, i); };
 function sweep(kind = swKind, plate = +$('swPlate').value || 0) { if (!S.plates.length) return null; const t0 = performance.now(); lastSweep = runSweep(setup(), kind, plate); drawSweep($('sweep'), lastSweep);

@@ -13,7 +13,8 @@ function finSet(n, root, span, th, x0, r0, mat, group) {
 // returns { group, mass (kg), length (m), mats: [materials needing clip/colour], noseX: 0 }
 export function buildProjectile(pr, o, makeMat) {
   const group = new THREE.Group(), mats = [];
-  const body = makeMat(0x8fa3a8, .45, .6), dark = makeMat(0x5d6a6e, .5, .5), alu = makeMat(0xa9b4b8, .35, .7); mats.push(body, dark, alu);
+  const FIN = { du: [0x5b605d, .3, 1], wha: [0x9ca3a9, .26, 1], steel: [0x8a9095, .34, .9], wc: [0x6e7378, .3, .9] }, bf = pr.type === 'KE' ? (FIN[o.core] || FIN.wha) : pr.kind === 'rpg' ? [0x55603f, .55, .2] : [0x6f7a62, .5, .25];
+  const seg = o.seg || 64, body = makeMat(bf[0], bf[1], bf[2]), dark = makeMat(0x5d6a6e, .5, .5), alu = makeMat(0xa9b4b8, .35, .7); mats.push(body, dark, alu);
   let mass = 0, length = 0, info = '';
   if (pr.type === 'KE') {
     const D = o.D / 1000, L = o.L / 1000, R = D / 2, cal = pr.cal / 1000; length = L;
@@ -22,13 +23,22 @@ export function buildProjectile(pr, o, makeMat) {
     const thr0 = -L * .62, thr1 = -L * .3, pitch = Math.max(D * .28, (thr1 - thr0) / 40); prof.push([R, thr0]);
     for (let y = thr0; y < thr1 - pitch; y += pitch) prof.push([R * 1.12, y + pitch * .2], [R * 1.12, y + pitch * .55], [R, y + pitch * .65], [R, y + pitch]); // buttress threads / sabot grooves
     prof.push([R, thr1], [R, -nose]);
-    for (let k = 1; k <= 8; k++) { const t = k / 8; prof.push([R * Math.sqrt(1 - t * t * .985) * (1 - t * .15), -nose * (1 - t)]); } // ogive tip
+    for (let k = 1; k <= 18; k++) { const t = k / 18; prof.push([R * Math.sqrt(1 - t * t * .985) * (1 - t * .15), -nose * (1 - t)]); } // ogive tip
     prof.push([0, 0]);
-    const g = lathe(prof, 36); const m = new THREE.Mesh(g, body); m.castShadow = true; group.add(m);
+    const g = lathe(prof, seg); g.computeVertexNormals(); const m = new THREE.Mesh(g, body); m.castShadow = true; group.add(m);
     const core = CORES[o.core]; const vol = frustumVol(prof); mass = vol * core.rho;
     const span = Math.max(1.6 * D, cal * .3), root = Math.min(Math.max(4 * D, L * .14), L * .25), th = Math.max(.0015, D * .08);
     finSet(pr.fins || 6, root, span - R, th, -L + D * .6 + root, R, alu, group);
     mass += (pr.fins || 6) * root * .78 * (span - R) * th * 2700;
+    // glowing tracer at the tail (HDR colour -> picked up by bloom)
+    const tr = new THREE.Mesh(new THREE.SphereGeometry(R * .75, 12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 1.6, .4), toneMapped: false })); tr.scale.x = 1.6; tr.position.x = -L - R * .3; tr.name = 'tracer'; group.add(tr);
+    // sabot: 3 petals (annular sectors) gripping the threaded section; separate at the muzzle
+    const so = cal / 2 * .96, sl = Math.min(L * .38, cal * 1.25), petals = [], sg = new THREE.Group(), smat = new THREE.MeshStandardMaterial({ color: 0x5f6467, roughness: .62, metalness: .35 });
+    for (let k = 0; k < 3; k++) { const a0 = k / 3 * Math.PI * 2 + .03, a1 = (k + 1) / 3 * Math.PI * 2 - .03, sh = new THREE.Shape();
+      sh.absarc(0, 0, so, a0, a1, false); sh.absarc(0, 0, R * 1.12, a1, a0, true);
+      const ge = new THREE.ExtrudeGeometry(sh, { depth: sl, bevelEnabled: true, bevelThickness: sl * .04, bevelSize: so * .03, bevelSegments: 2, curveSegments: 16 }); ge.rotateY(Math.PI / 2); ge.translate(-sl / 2, 0, 0);
+      const pm = new THREE.Mesh(ge, smat); pm.castShadow = true; const piv = new THREE.Group(); piv.add(pm); sg.add(piv); const am = (a0 + a1) / 2; petals.push({ piv, dir: new THREE.Vector3(0, Math.cos(am), Math.sin(am)) }); }
+    sg.userData.offset = (thr0 + thr1) / 2; var sabot = { group: sg, petals };
     info = `${core.name} rod Ø${o.D} × ${o.L} mm, L/D ${(o.L / o.D).toFixed(1)}`;
   } else {
     const c = pr.cal / 1000, r = c / 2; let prof;
@@ -38,8 +48,8 @@ export function buildProjectile(pr, o, makeMat) {
       finSet(4, c * 1.5, c * .55, .003, -c * 2.6, r, alu, group); finSet(4, c * .7, c * .35, .003, -length + c * .8, r, dark, group); }
     else { length = c * 6; prof = [[0, -length], [r * .5, -length], [r * .5, -c * 3.6], [r * .75, -c * 3.4], [r, -c * 3.2], [r, -c * 1.3], [r * .45, -c * .5], [r * .16, -c * .5], [r * .16, 0], [0, 0]];
       finSet(6, c * 1.0, c * .5, .002, -length + c * 1.0, r * .5, alu, group); }
-    const m = new THREE.Mesh(lathe(prof, 36), body); m.castShadow = true; group.add(m);
+    const m = new THREE.Mesh(lathe(prof, seg), body); m.castShadow = true; group.add(m);
     mass = frustumVol(prof) * 1500; info = `Ø${pr.cal} mm ${pr.tandem ? 'tandem ' : ''}shaped charge, ~${pr.pen} mm RHA nominal (est.)`;
   }
-  return { group, mass, length, mats, info };
+  return { group, mass, length, mats, info, sabot: typeof sabot !== 'undefined' ? sabot : null };
 }

@@ -100,3 +100,6 @@ Run `node validate.mjs`. It compares the model against public reference values a
 Some of these are calibration points rather than independent predictions: the nominal CE penetration and the RHA resistance.
 
 Files: `compare.js`, `sweep.js`, `damage.js`, `equiv.mjs` (RHA-equivalent helper), `index.html`, `app.js` (scene, UI, playback), `physics.js`, `projectile.js`, `data.js`, `validate.mjs`, `sw.js`, `manifest.json`.
+
+## Rendering (v11)
+PBR plate materials (procedural mill-scale steel, ceramic tiles, rubber NERA, bolted ERA, DU/Al/Ti tints) with beveled edges; smooth damage (raised heat-tinted entry lip, scorch/temper ring, glowing rim that cools, displaced rear dome, curled petals); rods with metallic finish, separating sabot petals and a glowing tracer; soft studio lighting, contact shadows and bloom on High quality. *Impact zoom* (Advanced → View) briefly closes in and slows down at the first impact.
