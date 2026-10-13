@@ -6,6 +6,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PROJECTILES, CORES, MATERIALS, SCENARIOS, DISCLAIMER } from './data.js';
 import { simulate, impactVelocity, ribBoxes, semiInfRHA } from './physics.js';
 import { buildProjectile } from './projectile.js';
+import { holeHook, createDamage } from './damage.js';
 
 const $ = id => document.getElementById(id);
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -37,7 +38,7 @@ function capMat(color, extra = {}) {
   const m = new THREE.MeshStandardMaterial({ color, roughness: .55, metalness: .25, side: THREE.DoubleSide, ...extra });
   m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
     if (!gl_FrontFacing) { float h = step(.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 9.)); gl_FragColor = vec4(mix(diffuseColor.rgb * .55, diffuseColor.rgb * .8, h), 1.); }`); };
-  return regClip(m);
+  return regClip(holeHook(m));
 }
 // colour map (ANSYS-like rainbow)
 const CMAP = [[0, [.1, .2, .85]], [.25, [.1, .75, .95]], [.5, [.2, .85, .3]], [.75, [1, .85, .1]], [1, [.95, .15, .1]]];
@@ -58,7 +59,7 @@ function rodMat(color, rough, metal) {
 
 // ---------------- state ----------------
 const S = { proj: 'm829a3', core: 'du', D: 22, L: 800, pen: 500, v0: 1555, range: 1000, plates: [], target: '', mapMode: 0, sel: -1 };
-let plateMeshes = [], sim = null, simT = 0, playing = false, speed = 1, built = null;
+let inspecting = false, plateMeshes = [], sim = null, simT = 0, playing = false, speed = 1, built = null;
 const clone = o => JSON.parse(JSON.stringify(o));
 
 // ---------------- plates ----------------
@@ -134,7 +135,7 @@ $('cmap').onclick = () => { S.mapMode = 1 - S.mapMode; $('cmap').textContent = '
 $('gMove').onclick = () => { tc.setMode('translate'); pillset(); }; $('gRot').onclick = () => { tc.setMode('rotate'); tc.showX = false; pillset(); };
 const pillset = () => { $('gMove').classList.toggle('on', tc.mode === 'translate'); $('gRot').classList.toggle('on', tc.mode === 'rotate'); tc.showX = tc.mode === 'translate'; };
 let autoFrame = true; $('autoF').onclick = () => { autoFrame = !autoFrame; $('autoF').classList.toggle('on', autoFrame); };
-$('rview').onclick = () => frame(); $('qual').onclick = () => setQuality(quality === 'high' ? 'low' : 'high');
+$('rview').onclick = () => frame(); $('insp').onclick = () => inspect(); $('qual').onclick = () => setQuality(quality === 'high' ? 'low' : 'high');
 $('pp').onclick = () => togglePlay(); $('fire').onclick = () => fire();
 document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { speed = +b.dataset.sp; document.querySelectorAll('[data-sp]').forEach(x => x.classList.toggle('on', x === b)); });
 $('scrub').oninput = e => { if (!sim) return; playing = false; $('pp').textContent = '▶'; simT = +e.target.value / 1000 * sim.tEnd; };
@@ -196,8 +197,10 @@ function buildRod() {
   placeRodIdle(); spec();
 }
 function placeRodIdle() { if (!rod) return; const first = Math.min(0, ...S.plates.map(p => p.x - p.t / 2000 - .1)); rod.group.position.set(first - .35, 0, 0); rod.group.rotation.set(0, 0, 0); rod.group.visible = true; tipPlane.constant = 1e3; mapU.uOn.value = 0; }
-let holes = [], debrisMesh = null, jet = null, tipCap = null, flyers = [];
+let holes = [], debrisMesh = null, jet = null, tipCap = null, flyers = [], damage = null;
 function clearSim() {
+  inspecting = false; if (debrisMesh) debrisMesh.visible = true;
+  damage?.dispose(); damage = null;
   sim = null; playing = false; for (const o of [...dyn.children]) if (!rod || o !== rod.group) { dyn.remove(o); o.traverse?.(x => x.geometry?.dispose()); }
   holes = []; debrisMesh = null; jet = null; tipCap = null; flyers = []; plateMeshes.forEach(m => { m.visible = true; m.scale.set(1, 1, 1); });
   placeRodIdle(); drawLegend(); $('rtab').innerHTML = 'Press FIRE to run the shot.'; $('verdict').classList.remove('show'); drawChart(); $('tread').textContent = '0.0 µs'; $('scrub').value = 0; overlay();
@@ -211,7 +214,7 @@ function fire() {
   const rimMat = regClip(new THREE.MeshBasicMaterial({ color: 0xff7a20, transparent: true, opacity: .9, polygonOffset: true, polygonOffsetFactor: -4, toneMapped: false }));
   for (const h of sim.holes) {
     const seg = sim.segs[h.seg], pm = plateMeshes[seg.plate]; const ch = new THREE.Mesh(new THREE.CylinderGeometry(h.r, h.r, 1, 20, 1, true).rotateZ(Math.PI / 2), holeMat); ch.visible = false; dyn.add(ch);
-    const discs = []; for (const s of [h.sIn, h.perforated ? h.sEnd : null]) { if (s == null) continue;
+    const discs = []; for (const s of []) { if (s == null) continue;
       const d = new THREE.Mesh(new THREE.CircleGeometry(h.r * 1.15, 24), holeMat); const r = new THREE.Mesh(new THREE.RingGeometry(h.r * 1.15, h.r * 1.6, 24), rimMat.clone()); regClip(r.material);
       for (const o of [d, r]) { o.position.set(s, 0, 0); o.quaternion.copy(pm.quaternion); o.rotateY(s === h.sIn ? -Math.PI / 2 : Math.PI / 2); o.translateZ(.0015); o.scale.y = 1; o.visible = false; dyn.add(o); }
       const cosO = Math.cos(THREE.MathUtils.degToRad(seg.obl)); d.scale.x = r.scale.x = 1 / Math.max(cosO, .2); discs.push([d, r, s]); }
@@ -223,7 +226,8 @@ function fire() {
     for (let i = 0; i < N; i++) debrisMesh.setColorAt(i, new THREE.Color(1, 1, 1)); dyn.add(debrisMesh); }
   if (p.type === 'CE') { jet = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 10).rotateZ(Math.PI / 2).translate(.5, 0, 0), rodMat(0xffaa66, .3, .8)); jet.visible = false; dyn.add(jet); }
   tipCap = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), regClip(new THREE.MeshBasicMaterial({ color: 0xffaa55, toneMapped: false }))); tipCap.visible = false; dyn.add(tipCap);
-  for (const e of sim.era) { const pm = plateMeshes[e.plate]; const f = []; for (const s of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(S.plates[e.plate].t / 4000, S.plates[e.plate].h, S.plates[e.plate].w), pm.material); m.quaternion.copy(pm.quaternion); m.visible = false; dyn.add(m); f.push({ m, s }); } flyers.push({ e, pm, f }); }
+  for (const e of []) { const pm = plateMeshes[e.plate]; const f = []; for (const s of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(S.plates[e.plate].t / 4000, S.plates[e.plate].h, S.plates[e.plate].w), pm.material); m.quaternion.copy(pm.quaternion); m.visible = false; dyn.add(m); f.push({ m, s }); } flyers.push({ e, pm, f }); }
+  damage = createDamage({ sim, S, plateMeshes, dyn, quality, cmap, regClip, rodD: S.D / 1000, cal: (p.cal || 100) / 1000 });
   simT = 0; playing = true; $('pp').textContent = '❚❚'; drawLegend(); showResults(); closePop(); select(-1, false); if (autoFrame) frame(true);
 }
 function sampleAt(t) { const a = sim.samples; let lo = 0, hi = a.length - 1; if (t <= a[0].t) return a[0]; if (t >= a[hi].t) return a[hi];
@@ -238,13 +242,15 @@ function updateSim() {
     else { const dtR = t - sim.ric.t, pl = S.plates[sim.ric.plate], a = THREE.MathUtils.degToRad(pl.ax), dir = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).normalize(); // deflect along the face
       rod.group.position.set(sim.ric.s, 0, 0).addScaledVector(dir, v0 * .75 * dtR); rod.group.rotation.set(0, 0, a); tipPlane.constant = 1e3; }
     const eroding = s.seg >= 0 && s.u < s.v - 1; mapU.uHot.value = Math.max(mapU.uHot.value * .0 + (eroding ? 1 : 0), s.L < rod.length * .9 ? .55 * Math.exp(-(t - (sim.segEvents.at(-1)?.tOut || t)) / 3e-4) : 0);
-    tipCap.visible = eroding && !ric; if (tipCap.visible) { tipCap.position.set(s.tip, 0, 0); tipCap.scale.setScalar(S.D / 1000 * .75); tipCap.material.color.setRGB(...cmap(S.mapMode ? 1 : s.v / v0)); }
+    tipCap.visible = eroding && !ric; if (tipCap.visible) { tipCap.position.set(s.tip, 0, 0); tipCap.scale.set(S.D / 1000 * .35, S.D / 1000 * (.75 + .35 * Math.min(1, (s.v - s.u) / 900)), S.D / 1000 * (.75 + .35 * Math.min(1, (s.v - s.u) / 900) /* mushroomed head */)); tipCap.material.color.setRGB(...cmap(S.mapMode ? 1 : s.v / v0)); }
     rod.group.visible = s.L > 0.001 || t < 1e-9;
   } else {
     const det = t >= sim.tDet; rod.group.visible = !det || t < sim.tDet + 4e-5; rod.group.position.set((det ? sim.samples[40].body : s.body) - 0, 0, 0); tipPlane.constant = 1e3; mapU.uVal.value = .1;
-    jet.visible = det && s.L > 0; if (jet.visible) { const tail = sim.sDet + Math.min(2000 * (t - sim.tDet), Math.max(0, s.tip - sim.sDet) * .6); const r = p.cal / 1000 * .035; jet.position.set(tail, 0, 0); jet.scale.set(Math.max(.001, s.tip - tail), r, r); mapU.uJet.value = 1; mapU.uTip.value = s.tip; mapU.uTail.value = tail; }
+    jet.visible = false; if (jet.visible) { const tail = sim.sDet + Math.min(2000 * (t - sim.tDet), Math.max(0, s.tip - sim.sDet) * .6); const r = p.cal / 1000 * .035; jet.position.set(tail, 0, 0); jet.scale.set(Math.max(.001, s.tip - tail), r, r); mapU.uJet.value = 1; mapU.uTip.value = s.tip; mapU.uTail.value = tail; }
     tipCap.visible = det && s.seg >= 0; if (tipCap.visible) { tipCap.position.set(s.tip, 0, 0); tipCap.scale.setScalar(p.cal / 1000 * .06); tipCap.material.color.setRGB(...cmap(s.v / 8500)); }
   }
+  damage?.update(t, s, sampleAt);
+  if (inspecting) { rod.group.visible = false; tipCap.visible = false; damage?.hideTransient(); if (debrisMesh) debrisMesh.visible = false; }
   for (const { h, ch, discs } of holes) { const tip = Math.min(sampleAt(Math.min(t, h.t1)).tip, h.sEnd); const on = t >= h.t0; const len = Math.max(.0005, tip - h.sIn);
     ch.visible = on; ch.position.set(h.sIn + len / 2, 0, 0); ch.scale.set(len, 1, 1);
     for (const [d, r, sx] of discs) { const vis = on && (sx === h.sIn || t >= h.t1); d.visible = r.visible = vis; const age = t - (sx === h.sIn ? h.t0 : h.t1); r.material.color.setRGB(...cmap(Math.max(.05, 1 - age / 4e-4))); r.material.opacity = Math.max(.25, 1 - age / 6e-4); } }
@@ -313,6 +319,12 @@ function frame(shot = false) { const b = new THREE.Box3().setFromObject(plateGro
   const tgt = new THREE.Vector3(cx, cy - (narrow ? .22 : .02) * d * vis, 0), pos = new THREE.Vector3(cx + d * .18, cy + d * .2, d);
   if (shot) camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: pos, q1: tgt }; else { camTween = null; controls.target.copy(tgt); camera.position.copy(pos); controls.update(); } }
 controls.addEventListener('start', () => { camTween = null; });
+// close-up on the damage: exit side of the last perforated plate (or crater of the last plate hit)
+
+function inspect(side = 'rear') { if (!sim || !sim.holes.length) return false; const h = [...sim.holes].reverse().find(h => h.perforated) || sim.holes.at(-1);
+  const x = side === 'rear' && h.perforated ? h.sEnd : h.sIn, d = Math.max(.16, (S.D || 30) / 1000 * 12), sgn = side === 'rear' && h.perforated ? 1 : -1;
+  const tgt = new THREE.Vector3(x, 0, 0), pos = new THREE.Vector3(x + sgn * d * .4, d * .3, d * .9); inspecting = true;
+  camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: pos, q1: tgt }; return true; }
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
 let last = performance.now();
@@ -330,5 +342,5 @@ try { if (location.hash.startsWith('#s=')) { const o = dec(location.hash.slice(3
 if (!booted) { buildRod(); loadScenario('strv103'); }
 setQuality(quality); toggleSection(false); pillset();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW', e));
-window.__app = { S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
+window.__app = { inspect, camera, controls, plateMeshes: () => plateMeshes, S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
 window.__ready = true;

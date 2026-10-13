@@ -22,7 +22,19 @@ Earlier versions: tag `v1-showroom` (tank showroom) and tag `v2-sandbox-complex`
 - Per-plate results table and v/L-vs-time chart.
 - Save/Load (localStorage) and share links.
 
-On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v7`).
+On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v8`).
+
+## Damage visuals (damage.js)
+Visual approximations, driven by the physics output:
+- **Plate holes:** real cutouts made by a shader discard along the shot channel. They grow with the crater bottom.
+- **Entry:** a crater lip with a glowing rim.
+- **Rear face:** the rear face bulges as the tip approaches, then petals open at the exit.
+- **ERA:** blocks break into tumbling bricks.
+- **Debris:** a behind-armor debris cone sized from the physics debris spread, plus the fragment instances.
+- **Rod:** a mushroomed hot head while eroding, the length broken off by ERA tumbling away, and break-up fragments when the rod is stopped.
+- **HEAT jet:** a particle stream, continuous and then particulated after breakup (drawn about 2× thicker for readability).
+
+Advanced → View → **Inspect damage** zooms onto the exit hole. Mobile and Low quality use fewer bricks, petals and particles.
 
 ## Physics (physics.js): time-stepped along the shot line, runs in a few ms
 - **Geometry:** a ray/plate intersection gives the LOS and obliquity of every plate and rib.
