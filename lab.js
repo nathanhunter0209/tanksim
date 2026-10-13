@@ -1,17 +1,23 @@
 // Dark sci-fi lab environment: reflective stage, emissive wall panels, light shafts, custom HDR-like env
 import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { radialTex } from './textures.js';
 import { TANKS } from './data.js';
 
 export function makeEnvScene() {
   const s = new THREE.Scene();
   const box = new THREE.Mesh(new THREE.BoxGeometry(40, 20, 40), new THREE.MeshBasicMaterial({ color: 0x07090c, side: THREE.BackSide })); s.add(box);
   const strip = (c, i, pos, size, rot = [0, 0, 0]) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(...size), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(i), side: THREE.DoubleSide })); m.position.set(...pos); m.rotation.set(...rot); s.add(m); };
-  strip(0xffffff, 3.2, [0, 9.5, 0], [14, 6], [Math.PI / 2, 0, 0]);   // overhead softbox
-  strip(0xffb36b, 4, [-19.5, 4, 0], [16, 1.5], [0, Math.PI / 2, 0]); // warm
-  strip(0x4fd9ff, 4, [19.5, 4, 0], [16, 1.5], [0, -Math.PI / 2, 0]); // cool
+  // studio softboxes: big overhead key, long strip lights for crisp paint highlights, warm/cool kickers
+  strip(0xffffff, 4.0, [0, 9.5, 0], [12, 5], [Math.PI / 2, 0, 0]);
+  strip(0xfff1e0, 6.0, [9, 7, 9], [2, 9], [0, -Math.PI / 4, 0]);
+  strip(0xe8f4ff, 5.0, [-9, 7, 9], [2, 9], [0, Math.PI / 4, 0]);
+  strip(0xffb36b, 4, [-19.5, 4, 0], [16, 1.5], [0, Math.PI / 2, 0]);
+  strip(0x4fd9ff, 4, [19.5, 4, 0], [16, 1.5], [0, -Math.PI / 2, 0]);
   strip(0x7fbfff, 1.5, [0, 3, -19.5], [30, 4]);
-  strip(0xffffff, 1.2, [0, 2, 19.5], [20, 3], [0, Math.PI, 0]);
+  strip(0xffffff, 1.0, [0, 2, 19.5], [20, 3], [0, Math.PI, 0]);
+  const fl = new THREE.Mesh(new THREE.CircleGeometry(12, 32), new THREE.MeshBasicMaterial({ color: 0x15181c })); fl.rotation.x = -Math.PI / 2; fl.position.y = -2; s.add(fl);
   return s;
 }
 
@@ -70,15 +76,22 @@ export function buildLab(scene, renderer) {
     fragmentShader: 'uniform vec3 col; uniform float k; varying float vy; varying vec3 vn; varying vec3 vv; void main(){ float f = pow(abs(dot(vn,vv)),1.5); gl_FragColor = vec4(col*k*f*smoothstep(0.,1.,vy)*(.4+.6*vy),1.); }' });
   const shafts = [];
   for (const [x, z, c] of [[-4, -1, 0xffc890], [0, 0, 0xbfe6ff], [4.5, 1, 0x7fd0ff]]) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(.35, 3.2, 13, 48, 1, true), shaftMat.clone()); m.material.uniforms.col.value = new THREE.Color(c); m.position.set(x, 6.5, z); m.userData.noAO = true; m.raycast = () => {}; lab.add(m); shafts.push(m);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(.35, 2.4, 13, 48, 1, true), shaftMat.clone()); m.material.uniforms.col.value = new THREE.Color(c); m.position.set(x, 6.5, z); m.userData.noAO = true; m.raycast = () => {}; lab.add(m); shafts.push(m);
   }
-  // lights
-  const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(6, 14, 7); key.castShadow = true;
-  Object.assign(key.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 40 }); key.shadow.bias = -.0004; key.shadow.normalBias = .02; key.shadow.mapSize.set(2048, 2048);
-  const warm = new THREE.SpotLight(0xffa860, 160, 40, .45, .6, 1.6); warm.position.set(-12, 9, 6);
-  const cool = new THREE.SpotLight(0x4fd0ff, 130, 40, .45, .6, 1.6); cool.position.set(12, 7, -6);
-  const rim = new THREE.SpotLight(0xbfe8ff, 200, 40, .5, .8, 1.6); rim.position.set(0, 6, -12);
-  for (const l of [warm, cool, rim]) { l.target.position.set(0, 1, 0); lab.add(l, l.target); }
-  lab.add(key, new THREE.HemisphereLight(0x8ab4ff, 0x0a0806, .25));
-  return { lab, key, refl, top, fallbackTop, shafts, setMirror(on) { refl.visible = top.visible = on; fallbackTop.visible = !on; } };
+  // contact shadow (grounding on every quality level)
+  const blob = new THREE.Mesh(new THREE.PlaneGeometry(11, 6), new THREE.MeshBasicMaterial({ map: radialTex([[0, 'rgba(0,0,0,.85)'], [.55, 'rgba(0,0,0,.45)'], [1, 'rgba(0,0,0,0)']], 128), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+  blob.rotation.x = -Math.PI / 2; blob.position.y = .004; blob.renderOrder = 1; blob.userData.noAO = true; blob.raycast = () => {}; lab.add(blob);
+  // lights: key (shadow caster), softbox area fill, kicker spots, back rims
+  const key = new THREE.DirectionalLight(0xfff4e6, 1.7); key.position.set(7, 13, 6); key.castShadow = true;
+  Object.assign(key.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 2, far: 35 }); key.shadow.bias = -.0003; key.shadow.normalBias = .025; key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 5; key.shadow.blurSamples = 16;
+  RectAreaLightUniformsLib.init();
+  const area = new THREE.RectAreaLight(0xeef4ff, 1.3, 9, 4); area.position.set(0, 8.5, 1.5); area.lookAt(0, 0, 0);
+  const fill = new THREE.DirectionalLight(0xbfd8ff, .45); fill.position.set(-9, 5, 6);
+  const warm = new THREE.SpotLight(0xffa860, 140, 40, .45, .7, 1.6); warm.position.set(-12, 9, 6);
+  const cool = new THREE.SpotLight(0x4fd0ff, 110, 40, .45, .7, 1.6); cool.position.set(12, 7, -6);
+  const rim = new THREE.SpotLight(0xd8eeff, 260, 40, .5, .8, 1.6); rim.position.set(-3, 6, -12);
+  const rim2 = new THREE.SpotLight(0xffd2a0, 160, 40, .5, .8, 1.6); rim2.position.set(6, 4, -11);
+  for (const l of [warm, cool, rim, rim2]) { l.target.position.set(0, 1.2, 0); lab.add(l, l.target); }
+  lab.add(key, area, fill, new THREE.HemisphereLight(0x8ab4ff, 0x0a0806, .18));
+  return { lab, key, area, blob, refl, top, fallbackTop, shafts, setMirror(on) { refl.visible = top.visible = on; fallbackTop.visible = !on; } };
 }
