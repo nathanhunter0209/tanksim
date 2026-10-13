@@ -7,6 +7,9 @@ import { PROJECTILES, CORES, MATERIALS, SCENARIOS, DISCLAIMER } from './data.js'
 import { simulate, impactVelocity, ribBoxes, semiInfRHA } from './physics.js';
 import { buildProjectile } from './projectile.js';
 import { holeHook, createDamage } from './damage.js';
+import { initCompare } from './compare.js';
+const embed = new URLSearchParams(location.search).has('embed'); if (embed) document.body.classList.add('embed');
+addEventListener('error', e => (window.__errs ||= []).push(String(e.message)));
 
 const $ = id => document.getElementById(id);
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -313,10 +316,10 @@ function frame(shot = false) { const b = new THREE.Box3().setFromObject(plateGro
   const x0 = Math.min(b.min.x, rod.group.position.x - rod.length) - .05, x1 = b.max.x + (shot ? .45 : .2), cy = (Math.max(b.min.y, -.9) + Math.min(b.max.y, .9)) / 2;
   const w = x1 - x0, h = Math.min(b.max.y - b.min.y, 1.8) + .2, vis = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   // leave room for the control card: left card on desktop, bottom sheet on phones
-  const narrow = innerWidth <= 900, advOpen = !narrow && $('adv').classList.contains('show'), left = narrow ? 0 : 400, right = innerWidth - (advOpen ? 410 : 0);
-  const effW = (right - left) / innerWidth, effH = narrow ? .55 : 1;
+  const narrow = innerWidth <= 900 || embed, advOpen = !narrow && $('adv').classList.contains('show'), left = narrow ? 0 : 400, right = innerWidth - (advOpen ? 410 : 0);
+  const effW = (right - left) / innerWidth, effH = embed ? .85 : narrow ? .55 : 1;
   const d = Math.max(w / (camera.aspect * effW), h / effH) / vis * 1.12, cx = (x0 + x1) / 2 - ((left + right) / 2 / innerWidth - .5) * camera.aspect * vis * d;
-  const tgt = new THREE.Vector3(cx, cy - (narrow ? .22 : .02) * d * vis, 0), pos = new THREE.Vector3(cx + d * .18, cy + d * .2, d);
+  const tgt = new THREE.Vector3(cx, cy - (embed ? .06 : narrow ? .22 : .02) * d * vis, 0), pos = new THREE.Vector3(cx + d * .18, cy + d * .2, d);
   if (shot) camTween = { t: 0, p0: camera.position.clone(), q0: controls.target.clone(), p1: pos, q1: tgt }; else { camTween = null; controls.target.copy(tgt); camera.position.copy(pos); controls.update(); } }
 controls.addEventListener('start', () => { camTween = null; });
 // close-up on the damage: exit side of the last perforated plate (or crater of the last plate hit)
@@ -329,7 +332,7 @@ addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; cam
 camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
 let last = performance.now();
 renderer.setAnimationLoop(() => {
-  const now = performance.now(), dt = Math.min(.1, (now - last) / 1000); last = now;
+  const now = performance.now(), dt = Math.min(.1, (now - last) / 1000); last = now; if (cmpActive) return;
   if (sim && playing) { simT += dt / +$('iPB').value * sim.tEnd * speed; if (simT >= sim.tEnd) { simT = sim.tEnd; playing = false; $('pp').textContent = '▶'; } }
   if (camTween) { camTween.t = Math.min(1, camTween.t + dt / .6); const k = camTween.t * camTween.t * (3 - 2 * camTween.t); camera.position.lerpVectors(camTween.p0, camTween.p1, k); controls.target.lerpVectors(camTween.q0, camTween.q1, k); if (camTween.t >= 1) camTween = null; }
   if (sim) { updateSim(); drawChart(); if (!playing && simT >= sim.tEnd && !$('verdict').classList.contains('show')) verdict(); }
@@ -341,6 +344,9 @@ let booted = false;
 try { if (location.hash.startsWith('#s=')) { const o = dec(location.hash.slice(3)); rod = null; buildRod(); applySetup(o); booted = true; } } catch (e) { console.warn('bad share link', e); }
 if (!booted) { buildRod(); loadScenario('strv103'); }
 setQuality(quality); toggleSection(false); pillset();
-if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW', e));
-window.__app = { inspect, camera, controls, plateMeshes: () => plateMeshes, S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
+if (!embed && 'serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW', e));
+let cmpActive = false;
+const cmp = embed ? null : initCompare({ S, setup, playLen: () => +$('iPB').value, speed: () => speed, setActive: v => { cmpActive = v; renderer.domElement.style.visibility = v ? 'hidden' : ''; closePop(); } });
+$('fire').onclick = () => cmp?.on ? cmp.fire() : fire();
+window.__app = { cmp, apply: o => { clearSim(); applySetup(o); }, fireStatic: () => { fire(); playing = false; simT = 0; }, seekT: t => { if (sim) { playing = false; simT = Math.min(t, sim.tEnd); } }, inspect, camera, controls, plateMeshes: () => plateMeshes, S, loadScenario, openAdv: () => setAdv(true), markCustom, addPlate: () => $('add').click(), editPlate, setProj: k => setProj(k), fire, seek: f => { if (sim) { playing = false; $('pp').textContent = '▶'; simT = f * sim.tEnd; } }, section: toggleSection, setMap: m => { S.mapMode = m; drawLegend(); }, get sim() { return sim; }, select, frame };
 window.__ready = true;

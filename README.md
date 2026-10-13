@@ -22,7 +22,14 @@ Earlier versions: tag `v1-showroom` (tank showroom) and tag `v2-sandbox-complex`
 - Per-plate results table and v/L-vs-time chart.
 - Save/Load (localStorage) and share links.
 
-On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v8`).
+On phones the controls are a bottom sheet, and Advanced opens as a second sheet. The app is a PWA (offline cache `tanksim-v9`).
+
+## Compare mode (compare.js)
+Tap **Compare ⇆** under FIRE to run two configurations side by side: two rounds against the current target, or the current round against two targets.
+- Each half of the split view is the same app embedded as `index.html?embed=1` with its UI hidden.
+- One physical clock drives both halves, so playback is synchronized.
+- A comparison row shows both verdicts, impact velocity, LOS hit, the residual, and a one-line difference.
+- On phones the panes stack vertically, and the sheet collapses to FIRE plus an "Edit setup" button after each shot.
 
 ## Damage visuals (damage.js)
 Visual approximations, driven by the physics output:
@@ -83,4 +90,4 @@ Run `node validate.mjs`. It compares the model against public reference values a
 
 Some of these are calibration points rather than independent predictions: the nominal CE penetration and the RHA resistance.
 
-Files: `equiv.mjs` (RHA-equivalent helper), `index.html`, `app.js` (scene, UI, playback), `physics.js`, `projectile.js`, `data.js`, `validate.mjs`, `sw.js`, `manifest.json`.
+Files: `compare.js`, `damage.js`, `equiv.mjs` (RHA-equivalent helper), `index.html`, `app.js` (scene, UI, playback), `physics.js`, `projectile.js`, `data.js`, `validate.mjs`, `sw.js`, `manifest.json`.
